@@ -1,0 +1,125 @@
+// File Lokasi: prisma/schema.prisma
+
+// Konfigurasi generator Prisma Client
+generator client {
+  provider = "prisma-client-js"
+  // output   = "../node_modules/.prisma/client" // Opsional: tentukan output eksplisit jika mau
+}
+
+// Konfigurasi datasource (koneksi database)
+datasource db {
+  provider = "mysql"                       // Provider database
+  url      = env("DATABASE_URL")          // URL koneksi dari file .env
+}
+
+// --- Enum untuk Role Pengguna ---
+enum Role {
+  SUPER_ADMIN // Bisa segalanya
+  YAYASAN     // Role Yayasan
+  REKTOR      // Role Rektor
+  PR1         // Role Pembantu Rektor 1
+  PR2         // Role Pembantu Rektor 2
+  EMPLOYEE    // Role default Karyawan/Staf/Dosen
+}
+
+// --- Enum untuk Status Absensi ---
+enum AttendanceStatus {
+  HADIR     // Clock In tepat waktu / Terlambat
+  IZIN      // Status Izin
+  SAKIT     // Status Sakit
+  ALPHA     // Tidak ada record di hari kerja
+  CUTI      // Status Cuti
+  LIBUR     // Untuk hari libur (ditentukan oleh logic)
+  SELESAI   // Setelah Clock Out berhasil
+  BELUM     // Untuk hari mendatang (ditentukan oleh logic)
+}
+
+// --- Model untuk NextAuth Adapter ---
+model Account {
+  id                String  @id @default(cuid()) @db.VarChar(191)
+  userId            String  @db.VarChar(191)
+  type              String  @db.VarChar(191)
+  provider          String  @db.VarChar(191)
+  providerAccountId String  @db.VarChar(191)
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String? @db.VarChar(191)
+  scope             String? @db.VarChar(191)
+  id_token          String? @db.Text
+  session_state     String? @db.VarChar(191)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid()) @db.VarChar(191)
+  sessionToken String   @unique @db.VarChar(191)
+  userId       String   @db.VarChar(191)
+  expires      DateTime @db.DateTime(3)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade) // <-- Relasi penyebab error migrasi sebelumnya
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String   @db.VarChar(191)
+  token      String   @unique @db.VarChar(191)
+  expires    DateTime @db.DateTime(3)
+
+  @@unique([identifier, token])
+}
+// --- Akhir Model NextAuth Adapter ---
+
+
+// --- Model User ---
+model User {
+  id            String    @id @default(cuid()) @db.VarChar(191)
+  name          String?   @db.VarChar(191)
+  email         String    @unique @db.VarChar(191)
+  password      String?   @db.VarChar(191) // Hash password
+  createdAt     DateTime  @default(now()) @db.DateTime(3)
+  updatedAt     DateTime  @updatedAt @db.DateTime(3)
+  role          Role      @default(EMPLOYEE)   // Menggunakan Enum Role
+  emailVerified DateTime? @db.DateTime(3)
+  image         String?   @db.VarChar(191)
+
+  // --- FIELD GAJI POKOK (BARU DITAMBAHKAN) ---
+  baseSalary    Decimal?  @db.Decimal(15, 2) // Tipe Decimal(15,2) untuk Rupiah, opsional (?)
+  // --- AKHIR FIELD GAJI POKOK ---
+
+  // Relasi
+  accounts      Account[]
+  sessions      Session[]
+  attendanceRecords AttendanceRecord[] // Nama relasi ke AttendanceRecord
+}
+
+
+// --- Model Catatan Absensi ---
+model AttendanceRecord {
+  id           String    @id @default(cuid()) @db.VarChar(191)
+  clockIn      DateTime  @db.DateTime(3)      // Waktu Clock In
+  clockOut     DateTime? @db.DateTime(3)      // Waktu Clock Out (Opsional)
+  createdAt    DateTime  @default(now()) @db.DateTime(3)
+  updatedAt    DateTime  @updatedAt @db.DateTime(3)
+  userId       String    @db.VarChar(191)     // Foreign Key ke User
+
+  // Field Lokasi
+  latitudeIn   Decimal?  @db.Decimal(9, 6)   // Latitude Clock In
+  longitudeIn  Decimal?  @db.Decimal(9, 6)   // Longitude Clock In
+  latitudeOut  Decimal?  @db.Decimal(9, 6)   // Latitude Clock Out
+  longitudeOut Decimal?  @db.Decimal(9, 6)   // Longitude Clock Out
+
+  // Field Status Absensi
+  status       AttendanceStatus @default(HADIR) // Menggunakan Enum AttendanceStatus
+
+  // Relasi ke User
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Index
+  @@index([userId, clockIn])
+  @@index([userId, status]) // Index untuk kolom status
+}
