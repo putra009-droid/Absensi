@@ -3,38 +3,53 @@
 // Konfigurasi generator Prisma Client
 generator client {
   provider = "prisma-client-js"
-  // output   = "../node_modules/.prisma/client" // Opsional: tentukan output eksplisit jika mau
 }
 
 // Konfigurasi datasource (koneksi database)
 datasource db {
-  provider = "mysql"                       // Provider database
-  url      = env("DATABASE_URL")          // URL koneksi dari file .env
+  provider = "mysql"
+  url      = env("DATABASE_URL")
 }
 
 // --- Enum untuk Role Pengguna ---
 enum Role {
-  SUPER_ADMIN // Bisa segalanya
-  YAYASAN     // Role Yayasan
-  REKTOR      // Role Rektor
-  PR1         // Role Pembantu Rektor 1
-  PR2         // Role Pembantu Rektor 2
-  EMPLOYEE    // Role default Karyawan/Staf/Dosen
+  SUPER_ADMIN
+  YAYASAN
+  REKTOR
+  PR1
+  PR2
+  EMPLOYEE
 }
 
 // --- Enum untuk Status Absensi ---
 enum AttendanceStatus {
-  HADIR     // Clock In tepat waktu / Terlambat
-  IZIN      // Status Izin
-  SAKIT     // Status Sakit
-  ALPHA     // Tidak ada record di hari kerja
-  CUTI      // Status Cuti
-  LIBUR     // Untuk hari libur (ditentukan oleh logic)
-  SELESAI   // Setelah Clock Out berhasil
-  BELUM     // Untuk hari mendatang (ditentukan oleh logic)
+  HADIR
+  IZIN
+  SAKIT
+  ALPHA
+  CUTI
+  LIBUR
+  SELESAI
+  BELUM
 }
 
+// ============================================
+// ===      ENUM BARU UNTUK TIPE POTONGAN   ===
+// ============================================
+enum DeductionCalculationType {
+  FIXED_USER            // Nominal tetap yang ditetapkan per user (misal: cicilan)
+  PERCENTAGE_USER       // Persentase yang ditetapkan per user (misal: iuran khusus X% dari Gaji Pokok)
+  PER_LATE_INSTANCE     // Nominal tetap per kejadian terlambat (aturan di DeductionType)
+  PER_ALPHA_DAY         // Nominal tetap per hari alpha (aturan di DeductionType)
+  PERCENTAGE_ALPHA_DAY  // Persentase (dari Gaji Harian?) per hari alpha (aturan di DeductionType)
+  MANDATORY_PERCENTAGE  // Persentase wajib (misal: BPJS, PPh 21) dari Gaji Kotor/Pokok (aturan di DeductionType)
+  // Tambahkan tipe lain jika perlu
+}
+// ============================================
+
+
 // --- Model untuk NextAuth Adapter ---
+// (Model Account, Session, VerificationToken tetap sama)
 model Account {
   id                String  @id @default(cuid()) @db.VarChar(191)
   userId            String  @db.VarChar(191)
@@ -48,78 +63,160 @@ model Account {
   scope             String? @db.VarChar(191)
   id_token          String? @db.Text
   session_state     String? @db.VarChar(191)
-
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@unique([provider, providerAccountId])
   @@index([userId])
+  @@map("accounts")
 }
-
 model Session {
   id           String   @id @default(cuid()) @db.VarChar(191)
   sessionToken String   @unique @db.VarChar(191)
   userId       String   @db.VarChar(191)
   expires      DateTime @db.DateTime(3)
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade) // <-- Relasi penyebab error migrasi sebelumnya
-
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([userId])
+  @@map("sessions")
 }
-
 model VerificationToken {
   identifier String   @db.VarChar(191)
   token      String   @unique @db.VarChar(191)
   expires    DateTime @db.DateTime(3)
-
   @@unique([identifier, token])
+  @@map("verification_tokens")
 }
-// --- Akhir Model NextAuth Adapter ---
 
-
-// --- Model User ---
+// --- Model User (Tambahkan relasi ke UserDeduction) ---
 model User {
   id            String    @id @default(cuid()) @db.VarChar(191)
   name          String?   @db.VarChar(191)
   email         String    @unique @db.VarChar(191)
-  password      String?   @db.VarChar(191) // Hash password
+  password      String?   @db.VarChar(191)
   createdAt     DateTime  @default(now()) @db.DateTime(3)
   updatedAt     DateTime  @updatedAt @db.DateTime(3)
-  role          Role      @default(EMPLOYEE)   // Menggunakan Enum Role
+  role          Role      @default(EMPLOYEE)
   emailVerified DateTime? @db.DateTime(3)
   image         String?   @db.VarChar(191)
+  baseSalary    Decimal?  @db.Decimal(15, 2)
 
-  // --- FIELD GAJI POKOK (BARU DITAMBAHKAN) ---
-  baseSalary    Decimal?  @db.Decimal(15, 2) // Tipe Decimal(15,2) untuk Rupiah, opsional (?)
-  // --- AKHIR FIELD GAJI POKOK ---
+  // Relasi yang sudah ada
+  accounts          Account[]
+  sessions          Session[]
+  attendanceRecords AttendanceRecord[]
+  allowances        UserAllowance[]
 
-  // Relasi
-  accounts      Account[]
-  sessions      Session[]
-  attendanceRecords AttendanceRecord[] // Nama relasi ke AttendanceRecord
+  // ============================================
+  // === RELASI BARU UNTUK POTONGAN PENGGUNA ===
+  // ============================================
+  deductions        UserDeduction[] // Daftar potongan spesifik yang dimiliki pengguna ini
+  // ============================================
+
+  @@map("users")
 }
 
 
-// --- Model Catatan Absensi ---
+// --- Model Catatan Absensi (Tetap Sama) ---
 model AttendanceRecord {
-  id           String    @id @default(cuid()) @db.VarChar(191)
-  clockIn      DateTime  @db.DateTime(3)      // Waktu Clock In
-  clockOut     DateTime? @db.DateTime(3)      // Waktu Clock Out (Opsional)
-  createdAt    DateTime  @default(now()) @db.DateTime(3)
-  updatedAt    DateTime  @updatedAt @db.DateTime(3)
-  userId       String    @db.VarChar(191)     // Foreign Key ke User
-
-  // Field Lokasi
-  latitudeIn   Decimal?  @db.Decimal(9, 6)   // Latitude Clock In
-  longitudeIn  Decimal?  @db.Decimal(9, 6)   // Longitude Clock In
-  latitudeOut  Decimal?  @db.Decimal(9, 6)   // Latitude Clock Out
-  longitudeOut Decimal?  @db.Decimal(9, 6)   // Longitude Clock Out
-
-  // Field Status Absensi
-  status       AttendanceStatus @default(HADIR) // Menggunakan Enum AttendanceStatus
-
-  // Relasi ke User
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Index
+  id            String   @id @default(cuid()) @db.VarChar(191)
+  clockIn       DateTime @db.DateTime(3)
+  clockOut      DateTime? @db.DateTime(3)
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @db.DateTime(3)
+  userId        String   @db.VarChar(191)
+  latitudeIn    Decimal? @db.Decimal(9, 6)
+  longitudeIn   Decimal? @db.Decimal(9, 6)
+  latitudeOut   Decimal? @db.Decimal(9, 6)
+  longitudeOut  Decimal? @db.Decimal(9, 6)
+  status        AttendanceStatus @default(HADIR)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([userId, clockIn])
-  @@index([userId, status]) // Index untuk kolom status
+  @@index([userId, status])
+  @@map("attendance_records")
 }
+
+
+// --- Model Tunjangan (Tetap Sama) ---
+model AllowanceType {
+  id            String  @id @default(cuid()) @db.VarChar(191)
+  name          String  @unique @db.VarChar(191)
+  description   String? @db.Text
+  isFixed       Boolean @default(true)
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @db.DateTime(3)
+  userAllowances UserAllowance[]
+  @@map("allowance_types")
+}
+model UserAllowance {
+  id              String  @id @default(cuid()) @db.VarChar(191)
+  amount          Decimal @db.Decimal(15, 2)
+  userId          String @db.VarChar(191)
+  user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  allowanceTypeId String @db.VarChar(191)
+  allowanceType   AllowanceType @relation(fields: [allowanceTypeId], references: [id], onDelete: Restrict)
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  updatedAt       DateTime @updatedAt @db.DateTime(3)
+  @@unique([userId, allowanceTypeId])
+  @@map("user_allowances")
+  @@index([userId])
+  @@index([allowanceTypeId])
+}
+
+
+// ============================================
+// ===        MODEL BARU UNTUK POTONGAN     ===
+// ============================================
+
+// Model untuk Jenis Potongan beserta Aturannya
+model DeductionType {
+  id              String  @id @default(cuid()) @db.VarChar(191)
+  name            String  @unique @db.VarChar(191) // Nama unik potongan (misal: "Potongan Keterlambatan")
+  description     String? @db.Text
+
+  // Tipe perhitungan potongan (wajib diisi)
+  calculationType DeductionCalculationType
+
+  // Field untuk menyimpan aturan (opsional tergantung calculationType)
+  ruleAmount      Decimal? @db.Decimal(15, 2) // Misal: Jumlah potongan per instance/hari
+  rulePercentage  Decimal? @db.Decimal(5, 2)  // Misal: Persentase potongan (0-100.00)
+
+  // Flag opsional
+  isMandatory     Boolean? @default(false) // Apakah potongan ini wajib (misal: BPJS, Pajak)
+
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  updatedAt       DateTime @updatedAt @db.DateTime(3)
+
+  // Relasi ke potongan yang ditetapkan ke pengguna
+  userDeductions UserDeduction[]
+
+  @@map("deduction_types")
+}
+
+// Model untuk menyimpan potongan spesifik (nominal/persen) yang ditetapkan ke pengguna
+// Utamanya digunakan untuk calculationType = FIXED_USER atau PERCENTAGE_USER
+model UserDeduction {
+  id                String  @id @default(cuid()) @db.VarChar(191)
+
+  // Relasi ke Pengguna
+  userId            String @db.VarChar(191)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Relasi ke Jenis Potongan
+  deductionTypeId   String @db.VarChar(191)
+  deductionType     DeductionType @relation(fields: [deductionTypeId], references: [id], onDelete: Restrict) // Jangan hapus DeductionType jika masih digunakan
+
+  // Nilai yang ditetapkan spesifik untuk user ini (jika calculationType-nya USER)
+  assignedAmount    Decimal? @db.Decimal(15, 2) // Digunakan jika calculationType = FIXED_USER
+  assignedPercentage Decimal? @db.Decimal(5, 2) // Digunakan jika calculationType = PERCENTAGE_USER (0-100.00)
+
+  createdAt         DateTime @default(now()) @db.DateTime(3)
+  updatedAt         DateTime @updatedAt @db.DateTime(3)
+
+  // Pastikan satu pengguna tidak memiliki jenis potongan yang sama lebih dari sekali
+  // (terutama untuk yang tipenya FIXED_USER/PERCENTAGE_USER)
+  @@unique([userId, deductionTypeId])
+  @@map("user_deductions")
+  @@index([userId])
+  @@index([deductionTypeId])
+}
+// ============================================
+// ===      AKHIR MODEL BARU POTONGAN       ===
+// ============================================

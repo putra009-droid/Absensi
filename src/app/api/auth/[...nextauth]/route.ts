@@ -1,31 +1,28 @@
 // File Lokasi: src/app/api/auth/[...nextauth]/route.ts
+// VERSI DEBUGGING SEDERHANA - DENGAN STRUKTUR authorize YANG BENAR
 
 import NextAuth, { AuthOptions, User as NextAuthUser } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import bcrypt from 'bcrypt';
 import { prisma } from '@/lib/prisma';
-// Import enum Role dari Prisma Client GENERATED (setelah migrate/generate)
-// Jika ada error di sini, pastikan sudah menjalankan `npx prisma generate` setelah migrate
 import { Role } from '@prisma/client';
 
-// Mendefinisikan ulang tipe data Session dan User di NextAuth agar TypeScript tahu ada 'id' dan 'role'
+// Mendefinisikan ulang tipe data Session dan User di NextAuth
 declare module 'next-auth' {
   interface Session {
-    user: { id: string; role: Role } & Omit<NextAuthUser, 'id'>; // Gunakan tipe Role dari Prisma
+    user: { id: string; role: Role } & Omit<NextAuthUser, 'id'>;
   }
-  interface User extends Omit<NextAuthUser, 'id'> { // Definisikan User dengan tipe Role
+  interface User extends Omit<NextAuthUser, 'id'> {
     id: string;
     role: Role;
   }
 }
 
 declare module 'next-auth/jwt' {
-  interface JWT { id: string; role: Role; } // Tambahkan role dengan tipe Role ke JWT
+  interface JWT { id: string; role: Role; }
 }
 
 export const authOptions: AuthOptions = {
-  // adapter: PrismaAdapter(prisma), // Aktifkan jika pakai session database
-
   providers: [
     CredentialsProvider({
       name: 'Credentials',
@@ -33,74 +30,59 @@ export const authOptions: AuthOptions = {
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
       },
-      async authorize(credentials) {
+      // ================================================================
+      // === TEMPATKAN FUNGSI authorize SEBAGAI VALUE DARI PROPERTY ===
+      // ================================================================
+      authorize: async (credentials) => { // Perhatikan sintaks property: async (credentials) => { ... }
+        // Log paling atas untuk memastikan fungsi ini terpanggil
+        console.log('!!!!!!!!!!!!!!!!!!!! AUTH_LOG: FUNGSI AUTHORIZE DIPANGGIL (Simplified Logic) !!!!!!!!!!!!!!!!!!!!');
+
+        // 1. Validasi input dasar (tetap lakukan)
         if (!credentials?.email || !credentials?.password) {
+          console.error('AUTH_LOG: [Authorize Simplified] Error: Email/Password required.');
           throw new Error('Email dan password wajib diisi.');
         }
+        console.log('AUTH_LOG: [Authorize Simplified] Credentials exist.');
 
-        // Cari user berdasarkan email
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
-        });
+        // 2. === Lewati Pengecekan DB & Password untuk Tes ===
+        console.log('AUTH_LOG: [Authorize Simplified] SKIPPING DB lookup & password check.');
 
-        // Jika user tidak ada atau tidak punya password
-        if (!user || !user.password) {
-          throw new Error('Email atau password salah.');
-        }
-
-        // Bandingkan password
-        const isPasswordValid = await bcrypt.compare(
-          credentials.password,
-          user.password
-        );
-
-        if (!isPasswordValid) {
-          throw new Error('Email atau password salah.');
-        }
-
-        // --- BAGIAN PENTING UNTUK ROLE ---
-        // Jika login berhasil, return object user yang menyertakan role
-        // Pastikan nilai 'role' sesuai dengan tipe 'Role' yang diimpor dari @prisma/client
-        return {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          image: user.image,
-          role: user.role, // <-- Sertakan role dari database
+        // 3. Buat objek user palsu (mock) untuk dikembalikan
+        const mockUser = {
+          id: "mock-user-id-123",
+          name: "Test User (Mock)",
+          email: credentials.email,
+          image: null,
+          role: Role.SUPER_ADMIN // Pastikan Role diimpor
         };
-        // --- AKHIR BAGIAN PENTING ---
-      },
-    }),
-    // ... provider lain bisa ditambahkan di sini ...
+
+        // 4. Log objek yang akan dikembalikan
+        console.log('AUTH_LOG: [Authorize Simplified] Returning MOCK user object:', mockUser);
+        return mockUser; // Kembalikan objek mock
+      } // <<< Akhir dari fungsi authorize
+      // ================================================================
+
+    }), // <<< Akhir dari CredentialsProvider({})
+    // ... provider lain jika ada ...
   ],
 
-  session: { strategy: 'jwt' }, // Gunakan JWT untuk sesi
-  secret: process.env.NEXTAUTH_SECRET, // Ambil dari .env
-
+  // Konfigurasi sesi, secret, dan pages tetap diperlukan
+  session: { strategy: 'jwt' },
+  secret: process.env.NEXTAUTH_SECRET, // Pastikan ini ada di .env
   pages: {
     signIn: '/login',
     error: '/login',
   },
 
-  // Callbacks untuk memastikan 'role' masuk ke token dan sesi
+  // --- Callbacks, Events, Debug bisa dikosongkan sementara ---
   callbacks: {
-    async jwt({ token, user }) {
-      // Saat user baru login (object 'user' ada), tambahkan id dan role ke token
-      if (user) {
-        token.id = user.id;
-        token.role = user.role; // Ambil role dari object user hasil 'authorize'
-      }
-      return token;
-    },
-    async session({ session, token }) {
-      // Ambil id dan role dari token JWT, lalu masukkan ke object session
-      if (token && session.user) {
-        session.user.id = token.id;
-        session.user.role = token.role; // Masukkan role ke sesi
-      }
-      return session;
-    },
+      // Kosongkan atau gunakan log detail dari sebelumnya jika 'authorize' sudah terpanggil
+      // async jwt({ token, user }) { console.log('JWT invoked'); return token; },
+      // async session({ session, token }) { console.log('Session invoked'); return session; },
   },
+  // events: {},
+  // debug: false,
+  // --- Akhir bagian yang dikosongkan ---
 };
 
 const handler = NextAuth(authOptions);
