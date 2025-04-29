@@ -1,22 +1,19 @@
 // src/app/api/admin/users/[userId]/allowances/route.ts
 
 import { NextResponse } from 'next/server';
-// HAPUS: import { getServerSession } from 'next-auth/next';
-// HAPUS: import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { prisma } from '@/lib/prisma';
-import { Role, Prisma } from '@prisma/client';
+import { Role, Prisma } from '@prisma/client'; // Pastikan Prisma diimpor
 import { withAuth, AuthenticatedRequest } from '@/lib/authMiddleware'; // <-- Import helper auth
 
-// Interface untuk context params
-interface RouteContext {
-  params: { userId: string };
-}
+// Interface RouteContext tidak lagi diperlukan jika pakai tipe generik
+// interface RouteContext {
+//  params: { userId: string };
+// }
 
-// Helper function untuk serialisasi Decimal (jika diperlukan)
+// Helper function untuk serialisasi Decimal (tidak berubah)
 const serializeUserAllowance = (ua: any) => ({
     ...ua,
     amount: ua.amount?.toString() ?? null,
-    // Sertakan detail AllowanceType jika di-include dalam query
     allowanceType: ua.allowanceType ? {
       id: ua.allowanceType.id,
       name: ua.allowanceType.name,
@@ -28,28 +25,35 @@ const serializeUserAllowance = (ua: any) => ({
 // =====================================================================
 // ===      FUNGSI GET (List Allowances for a specific User)         ===
 // =====================================================================
-const getUserAllowancesHandler = async (request: AuthenticatedRequest, context?: RouteContext) => {
-    const adminUserId = request.user?.id; // Admin yang request
-    const userId = context?.params?.userId; // User ID dari URL
-
-    if (!userId) {
-        return NextResponse.json({ message: 'User ID diperlukan di URL path.' }, { status: 400 });
+// PERBAIKAN SIGNATURE CONTEXT
+const getUserAllowancesHandler = async (
+    request: AuthenticatedRequest,
+    // Buat context dan params optional
+    context?: { params?: { userId?: string | string[] } }
+) => {
+    const adminUserId = request.user?.id;
+    // Validasi internal userId
+    const userIdParam = context?.params?.userId;
+    if (typeof userIdParam !== 'string') {
+        return NextResponse.json({ message: 'Format User ID tidak valid atau tidak ditemukan di URL.' }, { status: 400 });
     }
-     console.log(`[API GET /admin/users/${userId}/allowances] Request by Admin: ${adminUserId}`);
+    const userId = userIdParam; // Aman digunakan
+
+    console.log(`[API GET /admin/users/${userId}/allowances] Request by Admin: ${adminUserId}`);
 
     try {
-        // Ambil semua UserAllowance untuk userId tertentu
+        // Ambil semua UserAllowance
         const userAllowances = await prisma.userAllowance.findMany({
             where: { userId: userId },
-            include: { // Sertakan detail tipe tunjangan
+            include: {
                 allowanceType: {
                     select: { id: true, name: true, description: true, isFixed: true }
                 }
             },
-            orderBy: { allowanceType: { name: 'asc' } } // Urutkan
+            orderBy: { allowanceType: { name: 'asc' } }
         });
 
-        // Cek apakah user ada jika tidak ada tunjangan ditemukan (opsional tapi bagus)
+        // Cek user jika tunjangan kosong
         if (userAllowances.length === 0) {
             const userExists = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
             if (!userExists) {
@@ -57,16 +61,23 @@ const getUserAllowancesHandler = async (request: AuthenticatedRequest, context?:
             }
         }
 
-        // Serialisasi hasil sebelum dikirim
         const serializedAllowances = userAllowances.map(serializeUserAllowance);
         return NextResponse.json(serializedAllowances);
 
-    } catch (error) {
+    // Penanganan error unknown sudah benar
+    } catch (error: unknown) {
         console.error(`[API GET /admin/users/${userId}/allowances] Error:`, error);
-         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2023') {
-             return NextResponse.json({ message: 'Format User ID tidak valid.' }, { status: 400 });
-         }
-        return NextResponse.json({ message: 'Gagal mengambil data tunjangan pengguna.' }, { status: 500 });
+        let errorMessage = 'Gagal mengambil data tunjangan pengguna.';
+        if (error instanceof Prisma.PrismaClientKnownRequestError) {
+             errorMessage = `Database error: ${error.message}`;
+             if (error.code === 'P2023') {
+                 errorMessage = 'Format User ID tidak valid.';
+                 return NextResponse.json({ message: errorMessage }, { status: 400 });
+             }
+        } else if (error instanceof Error) {
+             errorMessage = error.message;
+        }
+        return NextResponse.json({ message: errorMessage }, { status: 500 });
     }
 };
 
@@ -74,15 +85,22 @@ const getUserAllowancesHandler = async (request: AuthenticatedRequest, context?:
 // =====================================================================
 // === FUNGSI POST (Assign/Create Allowance for a specific User)     ===
 // =====================================================================
-const assignAllowanceHandler = async (request: AuthenticatedRequest, context?: RouteContext) => {
+// PERBAIKAN SIGNATURE CONTEXT
+const assignAllowanceHandler = async (
+    request: AuthenticatedRequest,
+    // Buat context dan params optional
+    context?: { params?: { userId?: string | string[] } }
+) => {
     const adminUserId = request.user?.id;
-    const adminEmail = request.user?.email; // Untuk logging
-    const userId = context?.params?.userId;
-
-    if (!userId) {
-        return NextResponse.json({ message: 'User ID diperlukan di URL path.' }, { status: 400 });
+    const adminEmail = request.user?.email;
+    // Validasi internal userId
+    const userIdParam = context?.params?.userId;
+    if (typeof userIdParam !== 'string') {
+        return NextResponse.json({ message: 'Format User ID tidak valid atau tidak ditemukan di URL.' }, { status: 400 });
     }
-     console.log(`[API POST /admin/users/${userId}/allowances] Request by Admin: ${adminUserId}`);
+    const userId = userIdParam; // Aman digunakan
+
+    console.log(`[API POST /admin/users/${userId}/allowances] Request by Admin: ${adminUserId}`);
 
     try {
         const body = await request.json();
@@ -92,7 +110,6 @@ const assignAllowanceHandler = async (request: AuthenticatedRequest, context?: R
         if (!allowanceTypeId || typeof allowanceTypeId !== 'string') {
             return NextResponse.json({ message: 'ID Jenis Tunjangan (allowanceTypeId) wajib diisi.' }, { status: 400 });
         }
-        // Validasi Amount (harus ada dan angka positif)
         if (rawAmount === undefined || rawAmount === null || rawAmount === '') {
             return NextResponse.json({ message: 'Jumlah tunjangan (amount) wajib diisi.' }, { status: 400 });
         }
@@ -102,7 +119,7 @@ const assignAllowanceHandler = async (request: AuthenticatedRequest, context?: R
         }
         const amountToSave = new Prisma.Decimal(amountNumber);
 
-        // (Opsional tapi bagus) Cek apakah user dan allowance type benar-benar ada
+        // Cek user dan allowance type
         const [userExists, allowanceTypeExists] = await Promise.all([
              prisma.user.findUnique({ where: { id: userId }, select: { email: true} }),
              prisma.allowanceType.findUnique({ where: { id: allowanceTypeId }, select: { name: true} })
@@ -121,45 +138,50 @@ const assignAllowanceHandler = async (request: AuthenticatedRequest, context?: R
                 allowanceTypeId: allowanceTypeId,
                 amount: amountToSave,
             },
-            include: { // Sertakan detail tipe untuk respons
+            include: {
                 allowanceType: { select: { id: true, name: true } }
             }
         });
 
         console.log(`Tunjangan ${allowanceTypeExists.name} (ID: ${newUserAllowance.id}) ditambahkan untuk user ${userExists.email} (ID: ${userId}) oleh admin ${adminEmail} (ID: ${adminUserId})`);
 
-        // Kembalikan data yang sudah diserialisasi
         return NextResponse.json(
             { message: 'Tunjangan berhasil ditambahkan untuk pengguna!', userAllowance: serializeUserAllowance(newUserAllowance) },
-            { status: 201 } // 201 Created
+            { status: 201 }
         );
 
+    // Penanganan error unknown sudah benar
     } catch (error: unknown) {
         console.error(`[API POST /admin/users/${userId}/allowances] Error:`, error);
+        let errorMessage = 'Gagal menambahkan tunjangan untuk pengguna.';
+        let errorCode: string | undefined = undefined;
+
         if (error instanceof Prisma.PrismaClientKnownRequestError) {
-            // Error unique constraint (user sudah punya tunjangan jenis ini)
+            errorMessage = `Database error: ${error.message}`;
+            errorCode = error.code;
             if (error.code === 'P2002' && (error.meta?.target as string[])?.includes('UserAllowance_userId_allowanceTypeId_key')) {
-                return NextResponse.json({ message: 'Jenis tunjangan ini sudah ditambahkan untuk pengguna tersebut.' }, { status: 409 }); // 409 Conflict
+                errorMessage = 'Jenis tunjangan ini sudah ditambahkan untuk pengguna tersebut.';
+                return NextResponse.json({ message: errorMessage }, { status: 409 });
             }
-            // Error foreign key (userId atau allowanceTypeId tidak ditemukan saat create)
             if (error.code === 'P2003') {
-                 return NextResponse.json({ message: 'Referensi User atau Jenis Tunjangan tidak valid saat membuat data.'}, { status: 400 });
+                 errorMessage = 'Referensi User atau Jenis Tunjangan tidak valid saat membuat data.';
+                 return NextResponse.json({ message: errorMessage}, { status: 400 });
             }
-             // Error format ID
             if (error.code === 'P2023') {
-                 return NextResponse.json({ message: 'Format User ID tidak valid.' }, { status: 400 });
+                 errorMessage = 'Format User ID tidak valid.';
+                 return NextResponse.json({ message: errorMessage }, { status: 400 });
             }
-            // Error Prisma lain
-            return NextResponse.json({ message: `Database error: ${error.message}`, code: error.code }, { status: 500 });
+            return NextResponse.json({ message: errorMessage, code: errorCode }, { status: 500 });
+        } else if (error instanceof SyntaxError) {
+            errorMessage = 'Format body request tidak valid (JSON).';
+            return NextResponse.json({ message: errorMessage }, { status: 400 });
+        } else if (error instanceof Error) {
+             errorMessage = error.message;
         }
-         if (error instanceof SyntaxError) { // Body JSON tidak valid
-            return NextResponse.json({ message: 'Format body request tidak valid (JSON).' }, { status: 400 });
-        }
-        // Error umum
-        return NextResponse.json({ message: 'Gagal menambahkan tunjangan untuk pengguna.' }, { status: 500 });
+        return NextResponse.json({ message: errorMessage }, { status: 500 });
     }
 };
 
-// Bungkus semua handler dengan withAuth dan role SUPER_ADMIN
+// Bungkus semua handler dengan withAuth dan role SUPER_ADMIN (Perbaikan tercermin di signature handler)
 export const GET = withAuth(getUserAllowancesHandler, Role.SUPER_ADMIN);
 export const POST = withAuth(assignAllowanceHandler, Role.SUPER_ADMIN);

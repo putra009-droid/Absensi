@@ -1,10 +1,12 @@
 // Lokasi File: src/app/admin/users/edit/[userId]/_components/EditUserForm.tsx
 'use client';
 
-import { useState, useEffect } from 'react'; // Import useEffect
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Role, User } from '@prisma/client';
-import { useSession } from 'next-auth/react'; // Untuk cek sesi jika perlu disable role
+// PENTING: Anda mengimpor useSession dari NextAuth, tapi backend Anda pakai JWT kustom.
+// Ini bisa menyebabkan masalah jika sesi NextAuth tidak sinkron/tidak digunakan.
+import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { toast } from 'sonner'; // Asumsi menggunakan sonner
 
@@ -17,6 +19,7 @@ interface EditUserFormProps {
 
 export default function EditUserForm({ userData }: EditUserFormProps) {
   const router = useRouter();
+  // PENTING: `session` di sini berasal dari NextAuth, mungkin tidak berisi data user dari JWT kustom Anda.
   const { data: session, status: sessionStatus } = useSession();
 
   // State untuk setiap field form
@@ -27,12 +30,10 @@ export default function EditUserForm({ userData }: EditUserFormProps) {
 
   // Efek untuk sinkronisasi state baseSalary dengan prop jika prop berubah
   useEffect(() => {
-    // Set state baseSalary ketika userData.baseSalary berubah (dan tidak undefined)
-    // Ini menangani kasus jika userData dimuat/berubah setelah render awal
     if (userData.baseSalary !== undefined) {
-      setBaseSalary(userData.baseSalary || ''); // Set ke nilai prop atau "" jika null/undefined
+      setBaseSalary(userData.baseSalary || '');
     }
-  }, [userData.baseSalary]); // Dijalankan jika prop baseSalary berubah
+  }, [userData.baseSalary]);
 
   // Filter role yang bisa dipilih
   const availableRoles = Object.values(Role).filter(role => role !== Role.SUPER_ADMIN);
@@ -42,60 +43,55 @@ export default function EditUserForm({ userData }: EditUserFormProps) {
     e.preventDefault();
     setIsLoading(true);
 
-    // Siapkan data untuk dikirim ke API
     const updateData = {
       name: name.trim(),
       role: selectedRole,
-      baseSalary: baseSalary.trim() === '' ? null : baseSalary.trim(), // Kirim null jika kosong
+      baseSalary: baseSalary.trim() === '' ? null : baseSalary.trim(),
     };
 
-    // Validasi sisi klien
     if (!updateData.name) { toast.error('Nama tidak boleh kosong.'); setIsLoading(false); return; }
     if (updateData.baseSalary !== null && isNaN(Number(updateData.baseSalary))) { toast.error('Gaji Pokok harus berupa angka.'); setIsLoading(false); return; }
 
     try {
-      // Panggil API PUT ke endpoint yang benar
-      const res = await fetch(`/api/admin/users/${userData.id}`, { // Target: /api/admin/users/[userId]
+      // PENTING: Panggilan fetch ini perlu ditambahkan header Authorization
+      // dengan token JWT kustom Anda agar bisa lolos middleware `withAuth` di backend.
+      // Contoh: headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tokenDariKonteksAuth}` }
+      const res = await fetch(`/api/admin/users/${userData.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' }, // Tidak perlu header Authorization
+        headers: { 'Content-Type': 'application/json' }, // <-- Tambahkan header Authorization di sini!
         body: JSON.stringify(updateData),
       });
 
-      // Tangani respons error dari server
       if (!res.ok) {
         let errorData = { message: `Gagal memperbarui pengguna (Status: ${res.status})`};
         try { errorData = await res.json(); } catch (parseError) { console.error("Could not parse error response body:", parseError); }
         throw new Error(errorData.message);
       }
 
-      // Tangani respons sukses
       const data = await res.json();
       toast.success(data.message || 'Data pengguna berhasil diperbarui!');
 
-      // Redirect setelah sukses
       setTimeout(() => {
         router.push('/admin/users');
         router.refresh();
       }, 1500);
 
     } catch (error: any) {
-      // Tangani error fetch atau error yang dilempar dari blok try
       console.error("[EDIT_USER_ERROR]", error);
       toast.error(error.message || 'Terjadi kesalahan saat menyimpan.');
     } finally {
-      // Selalu hentikan loading
       setIsLoading(false);
     }
   };
 
-  // Tampilkan loading jika sesi belum siap
+  // Tampilkan loading jika sesi NextAuth belum siap (jika Anda tetap menggunakan useSession)
   if (sessionStatus === 'loading') {
     return <p className='text-center text-gray-500 italic'>Memeriksa sesi...</p>;
   }
 
   // Render Form
   return (
-    <div> {/* Wrapper div */}
+    <div>
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Input Nama */}
         <div>
@@ -114,15 +110,15 @@ export default function EditUserForm({ userData }: EditUserFormProps) {
           <label htmlFor="baseSalary" className="block text-sm font-medium text-gray-700">Gaji Pokok (Rp)</label>
           <input
             id="baseSalary"
-            type="number" // Gunakan tipe number
+            type="number"
             step="0.01"
             min="0"
-            value={baseSalary} // Tampilkan state baseSalary
-            onChange={(e) => setBaseSalary(e.target.value)} // Update state baseSalary
+            value={baseSalary}
+            onChange={(e) => setBaseSalary(e.target.value)}
             placeholder="Kosongkan jika tidak ada"
             disabled={isLoading}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border disabled:bg-gray-100"
-            autoComplete="off" // Matikan autocomplete untuk gaji
+            autoComplete="off"
           />
           <p className="mt-1 text-xs text-gray-500">Masukkan angka saja. Gunakan titik (.) untuk desimal jika perlu.</p>
         </div>
@@ -135,17 +131,21 @@ export default function EditUserForm({ userData }: EditUserFormProps) {
             required
             value={selectedRole}
             onChange={(e) => setSelectedRole(e.target.value as Role)}
-            disabled={isLoading || (userData.id === session?.user?.id && userData.role === Role.SUPER_ADMIN)} // Disable jika edit diri sendiri & Super Admin
-            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border ${(isLoading || (userData.id === session?.user?.id && userData.role === Role.SUPER_ADMIN)) ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'}`}
-            autoComplete="off" // Matikan autocomplete untuk role
+            // == PERBAIKAN 1: Logika disabled ==
+            disabled={isLoading || (userData.role === Role.SUPER_ADMIN)}
+            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border ${
+              (isLoading || (userData.role === Role.SUPER_ADMIN))
+              ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+            }`}
+            autoComplete="off"
           >
             {/* Opsi untuk Super Admin (jika user yang diedit adalah SA) */}
             {userData.role === Role.SUPER_ADMIN && ( <option key={userData.role} value={userData.role}>{userData.role} (Tidak bisa diubah)</option> )}
             {/* Opsi untuk role lain */}
             {availableRoles.map((role) => ( <option key={role} value={role}>{role}</option> ))}
           </select>
-          {/* Pesan jika role Super Admin di-disable */}
-          {userData.id === session?.user?.id && userData.role === Role.SUPER_ADMIN && ( <p className="mt-1 text-xs text-gray-500">Anda tidak dapat mengubah role Super Admin Anda sendiri.</p> )}
+          {/* == PERBAIKAN 2: Menghapus elemen <p> kondisional di bawah ini == */}
+          {/* Baris yang menyebabkan error kedua sebelumnya telah dihapus */}
         </div>
 
         {/* Tombol Submit dan Link Kembali */}

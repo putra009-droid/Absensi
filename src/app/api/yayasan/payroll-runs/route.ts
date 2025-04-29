@@ -3,7 +3,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 // Import tipe dan enum yang diperlukan
-import { Role, Prisma, PayrollRunStatus, PrismaClientKnownRequestError } from '@prisma/client';
+// PERBAIKAN 1: Hapus PrismaClientKnownRequestError dari impor
+import { Role, Prisma, PayrollRunStatus } from '@prisma/client';
 import { withAuth, AuthenticatedRequest } from '@/lib/authMiddleware';
 
 // Handler GET untuk Yayasan melihat Payroll Runs (default: PENDING_APPROVAL)
@@ -13,11 +14,9 @@ const getYayasanPayrollRunsHandler = async (request: AuthenticatedRequest) => {
     console.log(`[API GET /yayasan/payroll-runs] Request received from Yayasan: ${yayasanEmail} (ID: ${yayasanUserId})`);
 
     const { searchParams } = request.nextUrl;
-    // Ambil parameter status dari query, default ke PENDING_APPROVAL jika tidak ada
     const statusFilterParam = searchParams.get('status');
     let statusFilter: PayrollRunStatus | undefined;
 
-    // Validasi parameter status jika diberikan
     if (statusFilterParam) {
         if (Object.values(PayrollRunStatus).includes(statusFilterParam as PayrollRunStatus)) {
             statusFilter = statusFilterParam as PayrollRunStatus;
@@ -27,19 +26,17 @@ const getYayasanPayrollRunsHandler = async (request: AuthenticatedRequest) => {
             statusFilter = PayrollRunStatus.PENDING_APPROVAL;
         }
     } else {
-        // Default filter jika parameter status tidak ada
         statusFilter = PayrollRunStatus.PENDING_APPROVAL;
         console.log(`[API GET /yayasan/payroll-runs] No status parameter. Defaulting to PENDING_APPROVAL.`);
     }
 
     try {
-        // Query ke database dengan filter status
         const payrollRuns = await prisma.payrollRun.findMany({
             where: {
-                status: statusFilter // Terapkan filter status
+                status: statusFilter
             },
-            orderBy: { executionDate: 'desc' }, // Urutkan dari yang terbaru
-            include: { // Sertakan relasi yang relevan untuk ditampilkan
+            orderBy: { executionDate: 'desc' },
+            include: {
                 executedBy: { select: { id: true, name: true, email: true } },
                 approvedBy: { select: { name: true } },
                 rejectedBy: { select: { name: true } }
@@ -48,7 +45,6 @@ const getYayasanPayrollRunsHandler = async (request: AuthenticatedRequest) => {
 
         console.log(`[API GET /yayasan/payroll-runs] Found ${payrollRuns.length} runs with status ${statusFilter}.`);
 
-        // Format tanggal dan data lain sebelum mengirim
         const formattedRuns = payrollRuns.map(run => ({
             ...run,
             periodStart: run.periodStart.toISOString().split('T')[0],
@@ -62,12 +58,21 @@ const getYayasanPayrollRunsHandler = async (request: AuthenticatedRequest) => {
 
         return NextResponse.json(formattedRuns);
 
-    } catch (error) {
+    // PERBAIKAN 2: Tangani error 'unknown' dengan benar
+    } catch (error: unknown) { // Definisikan tipe error sebagai unknown
         console.error('[API GET /yayasan/payroll-runs] Error fetching payroll runs:', error);
-        if (error instanceof PrismaClientKnownRequestError) {
-            return NextResponse.json({ message: `Database error: ${error.message}` }, { status: 500 });
+
+        let errorMessage = 'Gagal mengambil data payroll runs untuk Yayasan.'; // Pesan default
+        // Cek tipe error sebelum akses properti
+        if (error instanceof Prisma.PrismaClientKnownRequestError) { // Gunakan Prisma.<NamaError>
+            errorMessage = `Database error: ${error.message}`;
+            // Anda bisa akses error.code di sini jika perlu
+        } else if (error instanceof Error) { // Tangani error JS standar
+             errorMessage = error.message;
         }
-        return NextResponse.json({ message: 'Gagal mengambil data payroll runs untuk Yayasan.' }, { status: 500 });
+
+        // Kembalikan pesan error yang sudah aman
+        return NextResponse.json({ message: errorMessage }, { status: 500 });
     }
 };
 

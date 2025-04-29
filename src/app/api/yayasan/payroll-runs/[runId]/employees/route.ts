@@ -3,22 +3,29 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 // Import tipe dan enum yang diperlukan
-import { Role, Prisma, PrismaClientKnownRequestError } from '@prisma/client';
+// PERBAIKAN 1: Hapus PrismaClientKnownRequestError dari impor
+import { Role, Prisma } from '@prisma/client';
 import { withAuth, AuthenticatedRequest } from '@/lib/authMiddleware';
 
-// Interface untuk context
-interface RouteContext {
-    params: { runId: string };
-}
+// Interface RouteContext tidak lagi diperlukan jika pakai tipe generik
+// interface RouteContext {
+//     params: { runId: string };
+// }
 
-// Handler GET untuk mengambil daftar nama karyawan dalam satu Payroll Run
-const getPayrollRunEmployeesHandler = async (request: AuthenticatedRequest, context?: RouteContext) => {
+// Handler GET untuk mengambil daftar nama karyawan dalam satu Payroll Run (Perbaikan Signature Context)
+const getPayrollRunEmployeesHandler = async (
+    request: AuthenticatedRequest,
+    // PERBAIKAN 3: Buat context dan params optional agar cocok dg middleware longgar
+    context?: { params?: { runId?: string | string[] } }
+) => {
     const yayasanUserId = request.user?.id;
-    const runId = context?.params?.runId;
+    // Validasi internal untuk runId
+    const runIdParam = context?.params?.runId;
 
-    if (!runId) {
-        return NextResponse.json({ message: 'ID Payroll Run diperlukan.' }, { status: 400 });
+    if (typeof runIdParam !== 'string') {
+        return NextResponse.json({ message: 'Format ID Payroll Run tidak valid atau tidak ditemukan di URL.' }, { status: 400 });
     }
+    const runId = runIdParam; // Aman digunakan sebagai string
 
     console.log(`[API Get Employees] Request for Run ID: ${runId} by Yayasan: ${yayasanUserId}`);
 
@@ -60,19 +67,30 @@ const getPayrollRunEmployeesHandler = async (request: AuthenticatedRequest, cont
         // Kembalikan array berisi nama
         return NextResponse.json(employeeNames);
 
+    // PERBAIKAN 2: Penanganan error 'unknown'
     } catch (error: unknown) {
-        console.error(`[API Get Employees] Error processing Run ID ${runId}:`, error);
-        if (error instanceof PrismaClientKnownRequestError) {
+        console.error(`[API Get Employees] Error processing Run ID ${runId ?? 'unknown'}:`, error); // Gunakan runId yang sudah divalidasi
+
+        let errorMessage = 'Gagal mengambil daftar karyawan.'; // Default
+        let errorCode: string | undefined = undefined;
+
+        // Gunakan Prisma.PrismaClientKnownRequestError
+        if (error instanceof Prisma.PrismaClientKnownRequestError) {
+            errorMessage = `Database error: ${error.message}`;
+            errorCode = error.code;
             if (error.code === 'P2023') { // Invalid ID format (misal UUID salah)
                 return NextResponse.json({ message: 'Format ID Payroll Run tidak valid.' }, { status: 400 });
             }
             // Handle error Prisma lainnya
-            return NextResponse.json({ message: `Database error: ${error.message}`, code: error.code }, { status: 500 });
+            return NextResponse.json({ message: errorMessage, code: errorCode }, { status: 500 });
+        } else if (error instanceof Error) { // Tangani error JS standar
+            errorMessage = error.message;
         }
         // Error umum lainnya
-        return NextResponse.json({ message: 'Gagal mengambil daftar karyawan.' }, { status: 500 });
+        return NextResponse.json({ message: errorMessage }, { status: 500 });
     }
 };
 
 // Bungkus handler dengan withAuth, HANYA role YAYASAN yang bisa akses
+// (Perbaikan 3 tercermin pada signature getPayrollRunEmployeesHandler di atas)
 export const GET = withAuth(getPayrollRunEmployeesHandler, Role.YAYASAN);

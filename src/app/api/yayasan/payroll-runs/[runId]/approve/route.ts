@@ -3,25 +3,34 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 // Import tipe dan enum yang diperlukan
-import { Role, Prisma, PayrollRunStatus, PrismaClientKnownRequestError } from '@prisma/client';
+// PERBAIKAN 1: Hapus PrismaClientKnownRequestError dari impor
+import { Role, Prisma, PayrollRunStatus } from '@prisma/client';
 import { withAuth, AuthenticatedRequest } from '@/lib/authMiddleware';
 
-// Interface untuk menangkap parameter dinamis dari context
-interface RouteContext {
-    params: { runId: string };
-}
+// Interface RouteContext tidak lagi diperlukan jika pakai tipe generik
+// interface RouteContext {
+//     params: { runId: string };
+// }
 
-// Handler untuk menyetujui Payroll Run
-const approvePayrollRunHandler = async (request: AuthenticatedRequest, context?: RouteContext) => {
+// Handler untuk menyetujui Payroll Run (Perbaikan Signature Context)
+const approvePayrollRunHandler = async (
+    request: AuthenticatedRequest,
+    // PERBAIKAN 3: Buat context dan params optional agar cocok dg middleware longgar
+    context?: { params?: { runId?: string | string[] } }
+) => {
     const yayasanUserId = request.user?.id; // ID user Yayasan yang melakukan aksi
     const yayasanEmail = request.user?.email; // Email untuk logging
-    const runId = context?.params?.runId;
+    // Validasi internal untuk runId
+    const runIdParam = context?.params?.runId;
 
-    // Validasi dasar
-    if (!runId) {
-        return NextResponse.json({ message: 'ID Payroll Run diperlukan di URL path.' }, { status: 400 });
+    if (typeof runIdParam !== 'string') {
+        return NextResponse.json({ message: 'Format ID Payroll Run tidak valid atau tidak ditemukan di URL.' }, { status: 400 });
     }
+    const runId = runIdParam; // Aman digunakan sebagai string
+
+    // Validasi yayasanUserId (dari token)
     if (!yayasanUserId) {
+        // Ini seharusnya tidak terjadi jika withAuth bekerja, tapi sebagai pengaman
         return NextResponse.json({ message: 'ID pengguna Yayasan tidak valid.' }, { status: 401 });
     }
 
@@ -59,8 +68,7 @@ const approvePayrollRunHandler = async (request: AuthenticatedRequest, context?:
                 rejectedAt: null,
                 rejectionReason: null,
             },
-            // Pilih field yang ingin dikembalikan dalam respons
-            select: {
+            select: { // Pilih field yang ingin dikembalikan dalam respons
                 id: true,
                 status: true,
                 approvedAt: true,
@@ -76,22 +84,34 @@ const approvePayrollRunHandler = async (request: AuthenticatedRequest, context?:
             payrollRun: updatedPayrollRun
         });
 
+    // PERBAIKAN 2: Penanganan error 'unknown'
     } catch (error: unknown) {
-        console.error(`[API Approve Payroll] Error processing Run ID ${runId}:`, error);
-        // Tangani error Prisma
-        if (error instanceof PrismaClientKnownRequestError) {
-            if (error.code === 'P2025') { // Record to update not found
+        console.error(`[API Approve Payroll] Error processing Run ID ${runId ?? 'unknown'}:`, error);
+
+        let errorMessage = 'Gagal menyetujui Payroll Run karena kesalahan server.'; // Default
+        let errorCode: string | undefined = undefined;
+
+        // Gunakan Prisma.PrismaClientKnownRequestError
+        if (error instanceof Prisma.PrismaClientKnownRequestError) {
+            errorMessage = `Database error: ${error.message}`;
+            errorCode = error.code; // Simpan kode error Prisma
+            if (error.code === 'P2025') {
                  return NextResponse.json({ message: `Payroll Run dengan ID '${runId}' tidak ditemukan saat update.` }, { status: 404 });
             }
-            if (error.code === 'P2023') { // Invalid ID format
+            if (error.code === 'P2023') {
                 return NextResponse.json({ message: 'Format ID Payroll Run tidak valid.' }, { status: 400 });
             }
-            return NextResponse.json({ message: `Database error: ${error.message}`, code: error.code }, { status: 500 });
+            // Error Prisma lainnya
+            return NextResponse.json({ message: errorMessage, code: errorCode }, { status: 500 });
+        } else if (error instanceof Error) { // Tangani error JS standar
+             errorMessage = error.message;
         }
-        // Error umum lainnya
-        return NextResponse.json({ message: 'Gagal menyetujui Payroll Run karena kesalahan server.' }, { status: 500 });
+
+        // Kembalikan error umum dengan pesan yang sudah dicek tipenya
+        return NextResponse.json({ message: errorMessage }, { status: 500 });
     }
 };
 
 // Bungkus handler dengan withAuth, HANYA role YAYASAN yang bisa akses
+// (Perbaikan 3 tercermin pada signature approvePayrollRunHandler di atas)
 export const PUT = withAuth(approvePayrollRunHandler, Role.YAYASAN);

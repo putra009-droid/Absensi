@@ -1,23 +1,20 @@
 // src/app/api/admin/users/[userId]/deductions/route.ts
 
 import { NextResponse } from 'next/server';
-// HAPUS: import { getServerSession } from 'next-auth/next';
-// HAPUS: import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { prisma } from '@/lib/prisma';
-import { Role, Prisma, DeductionCalculationType } from '@prisma/client';
+import { Role, Prisma, DeductionCalculationType } from '@prisma/client'; // Pastikan Prisma diimpor
 import { withAuth, AuthenticatedRequest } from '@/lib/authMiddleware'; // <-- Import helper auth
 
-// Interface untuk context params
-interface RouteContext {
-    params: { userId: string };
-}
+// Interface RouteContext tidak lagi diperlukan jika pakai tipe generik
+// interface RouteContext {
+//     params: { userId: string };
+// }
 
-// Helper function untuk serialisasi UserDeduction
+// Helper function untuk serialisasi UserDeduction (tidak berubah)
 const serializeUserDeduction = (ud: any) => ({
     ...ud,
     assignedAmount: ud.assignedAmount?.toString() ?? null,
     assignedPercentage: ud.assignedPercentage?.toString() ?? null,
-    // Sertakan detail DeductionType jika ada
     deductionType: ud.deductionType ? {
         id: ud.deductionType.id,
         name: ud.deductionType.name,
@@ -28,22 +25,27 @@ const serializeUserDeduction = (ud: any) => ({
 // =====================================================================
 // ===      FUNGSI GET (List Deductions for a specific User)         ===
 // =====================================================================
-const getUserDeductionsHandler = async (request: AuthenticatedRequest, context?: RouteContext) => {
-    const adminUserId = request.user?.id; // Admin yang request
-    const userId = context?.params?.userId; // Ambil ID user dari context
-
-    if (!userId) {
-        return NextResponse.json({ message: 'User ID diperlukan di URL path.' }, { status: 400 });
+// PERBAIKAN SIGNATURE CONTEXT
+const getUserDeductionsHandler = async (
+    request: AuthenticatedRequest,
+    // Buat context dan params optional
+    context?: { params?: { userId?: string | string[] } }
+) => {
+    const adminUserId = request.user?.id;
+    // Validasi internal userId
+    const userIdParam = context?.params?.userId;
+    if (typeof userIdParam !== 'string') {
+        return NextResponse.json({ message: 'Format User ID tidak valid atau tidak ditemukan di URL.' }, { status: 400 });
     }
+    const userId = userIdParam; // Aman digunakan
+
     console.log(`[API GET /admin/users/${userId}/deductions] Request by Admin: ${adminUserId}`);
 
     try {
-        // Ambil UserDeduction yang HANYA relevan untuk assignment spesifik user
-        // (FIXED_USER dan PERCENTAGE_USER)
+        // Ambil UserDeduction yang relevan
         const userDeductions = await prisma.userDeduction.findMany({
             where: {
                 userId: userId,
-                // Filter hanya untuk tipe yang nilainya di-assign per user
                 deductionType: {
                     calculationType: {
                         in: [DeductionCalculationType.FIXED_USER, DeductionCalculationType.PERCENTAGE_USER]
@@ -51,14 +53,14 @@ const getUserDeductionsHandler = async (request: AuthenticatedRequest, context?:
                 }
             },
             include: {
-                deductionType: { // Sertakan data dari DeductionType
+                deductionType: {
                     select: { id: true, name: true, calculationType: true }
                 }
             },
             orderBy: { deductionType: { name: 'asc' } }
         });
 
-        // Cek apakah user ada jika tidak ada potongan ditemukan (opsional)
+        // Cek user jika potongan kosong
         if (userDeductions.length === 0) {
             const userExists = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
             if (!userExists) {
@@ -69,12 +71,22 @@ const getUserDeductionsHandler = async (request: AuthenticatedRequest, context?:
         const serializedDeductions = userDeductions.map(serializeUserDeduction);
         return NextResponse.json(serializedDeductions);
 
-    } catch (error) {
+    // Penanganan error unknown sudah benar
+    } catch (error: unknown) {
         console.error(`[API GET /admin/users/${userId ?? 'unknown'}/deductions] Error:`, error);
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2023') {
-           return NextResponse.json({ message: 'Format User ID tidak valid.' }, { status: 400 });
+        let errorMessage = 'Gagal mengambil data potongan pengguna.';
+        if (error instanceof Prisma.PrismaClientKnownRequestError) {
+             errorMessage = `Database error: ${error.message}`;
+             if (error.code === 'P2023') {
+                 errorMessage = 'Format User ID tidak valid.';
+                 return NextResponse.json({ message: errorMessage }, { status: 400 });
+             }
+             // Kembalikan pesan error Prisma umum
+             return NextResponse.json({ message: errorMessage }, { status: 500 });
+        } else if (error instanceof Error) {
+             errorMessage = error.message;
         }
-        return NextResponse.json({ message: 'Gagal mengambil data potongan pengguna.' }, { status: 500 });
+        return NextResponse.json({ message: errorMessage }, { status: 500 });
     }
 };
 
@@ -82,14 +94,21 @@ const getUserDeductionsHandler = async (request: AuthenticatedRequest, context?:
 // =====================================================================
 // === FUNGSI POST (Assign/Create Deduction for a specific User)     ===
 // =====================================================================
-const assignDeductionHandler = async (request: AuthenticatedRequest, context?: RouteContext) => {
+// PERBAIKAN SIGNATURE CONTEXT
+const assignDeductionHandler = async (
+    request: AuthenticatedRequest,
+    // Buat context dan params optional
+    context?: { params?: { userId?: string | string[] } }
+) => {
     const adminUserId = request.user?.id;
-    const adminEmail = request.user?.email; // Untuk logging
-    const userId = context?.params?.userId;
-
-    if (!userId) {
-        return NextResponse.json({ message: 'User ID diperlukan di URL path.' }, { status: 400 });
+    const adminEmail = request.user?.email;
+    // Validasi internal userId
+    const userIdParam = context?.params?.userId;
+    if (typeof userIdParam !== 'string') {
+        return NextResponse.json({ message: 'Format User ID tidak valid atau tidak ditemukan di URL.' }, { status: 400 });
     }
+    const userId = userIdParam; // Aman digunakan
+
     console.log(`[API POST /admin/users/${userId}/deductions] Request by Admin: ${adminUserId}`);
 
     try {
@@ -101,10 +120,10 @@ const assignDeductionHandler = async (request: AuthenticatedRequest, context?: R
             return NextResponse.json({ message: 'ID Jenis Potongan (deductionTypeId) wajib diisi.' }, { status: 400 });
         }
 
-        // Cek user dan deduction type ada, dan ambil calculationType-nya
+        // Cek user dan deduction type
         const [userExists, deductionTypeExists] = await Promise.all([
              prisma.user.findUnique({ where: { id: userId }, select: { email: true } }),
-             prisma.deductionType.findUnique({ where: { id: deductionTypeId } }) // Ambil semua field
+             prisma.deductionType.findUnique({ where: { id: deductionTypeId } })
         ]);
         if (!userExists) {
              return NextResponse.json({ message: `User dengan ID '${userId}' tidak ditemukan.` }, { status: 404 });
@@ -113,13 +132,13 @@ const assignDeductionHandler = async (request: AuthenticatedRequest, context?: R
              return NextResponse.json({ message: `Jenis potongan dengan ID '${deductionTypeId}' tidak ditemukan.` }, { status: 404 });
         }
 
-        // Siapkan data untuk disimpan
+        // Siapkan data
         const dataToCreate: Prisma.UserDeductionCreateInput = {
             user: { connect: { id: userId } },
             deductionType: { connect: { id: deductionTypeId } },
         };
 
-        // Validasi amount/percentage berdasarkan calculationType
+        // Validasi amount/percentage
         if (deductionTypeExists.calculationType === DeductionCalculationType.FIXED_USER) {
             if (rawAmount === undefined || rawAmount === null || rawAmount === '') { return NextResponse.json({ message: `Jumlah Potongan (assignedAmount) wajib diisi untuk tipe ${deductionTypeExists.calculationType}.` }, { status: 400 }); }
             const amountNum = Number(rawAmount);
@@ -135,15 +154,13 @@ const assignDeductionHandler = async (request: AuthenticatedRequest, context?: R
             dataToCreate.assignedAmount = null;
 
         } else {
-            // Tipe kalkulasi lain tidak memerlukan assignment nilai spesifik user
             return NextResponse.json({ message: `Jenis potongan '${deductionTypeExists.name}' (${deductionTypeExists.calculationType}) tidak memerlukan nilai spesifik saat ditetapkan ke pengguna.` }, { status: 400 });
         }
-        // --- Akhir Validasi Input ---
 
         // Buat UserDeduction baru
         const newUserDeduction = await prisma.userDeduction.create({
             data: dataToCreate,
-            include: { // Sertakan detail DeductionType dalam response
+            include: {
                deductionType: { select: { id: true, name: true, calculationType: true } }
             }
         });
@@ -152,22 +169,41 @@ const assignDeductionHandler = async (request: AuthenticatedRequest, context?: R
 
         return NextResponse.json(
             { message: 'Potongan berhasil ditambahkan untuk pengguna!', userDeduction: serializeUserDeduction(newUserDeduction) },
-            { status: 201 } // 201 Created
+            { status: 201 }
         );
 
+    // Penanganan error unknown sudah benar
     } catch (error: unknown) {
         console.error(`[API POST /admin/users/${userId ?? 'unknown'}/deductions] Error:`, error);
+        let errorMessage = 'Gagal menambahkan potongan untuk pengguna.';
+        let errorCode: string | undefined = undefined;
+
         if (error instanceof Prisma.PrismaClientKnownRequestError) {
-            if (error.code === 'P2002' && (error.meta?.target as string[])?.includes('UserDeduction_userId_deductionTypeId_key')) { return NextResponse.json({ message: 'Jenis potongan ini sudah ditambahkan untuk pengguna tersebut.' }, { status: 409 }); }
-            if (error.code === 'P2003') { return NextResponse.json({ message: 'Referensi User atau Jenis Potongan tidak valid.'}, { status: 400 }); }
-            if (error.code === 'P2023') { return NextResponse.json({ message: 'Format User ID tidak valid.' }, { status: 400 }); }
-            return NextResponse.json({ message: `Database error: ${error.message}`, code: error.code }, { status: 500 });
+            errorMessage = `Database error: ${error.message}`;
+            errorCode = error.code;
+            if (error.code === 'P2002' && (error.meta?.target as string[])?.includes('UserDeduction_userId_deductionTypeId_key')) {
+                 errorMessage = 'Jenis potongan ini sudah ditambahkan untuk pengguna tersebut.';
+                 return NextResponse.json({ message: errorMessage }, { status: 409 });
+            }
+            if (error.code === 'P2003') {
+                 errorMessage = 'Referensi User atau Jenis Potongan tidak valid.';
+                 return NextResponse.json({ message: errorMessage}, { status: 400 });
+            }
+            if (error.code === 'P2023') {
+                 errorMessage = 'Format User ID tidak valid.';
+                 return NextResponse.json({ message: errorMessage }, { status: 400 });
+            }
+            return NextResponse.json({ message: errorMessage, code: errorCode }, { status: 500 });
+        } else if (error instanceof SyntaxError) {
+             errorMessage = 'Format body request tidak valid (JSON).';
+             return NextResponse.json({ message: errorMessage }, { status: 400 });
+        } else if (error instanceof Error) {
+            errorMessage = error.message;
         }
-        if (error instanceof SyntaxError) { return NextResponse.json({ message: 'Format body request tidak valid (JSON).' }, { status: 400 }); }
-        return NextResponse.json({ message: 'Gagal menambahkan potongan untuk pengguna.' }, { status: 500 });
+        return NextResponse.json({ message: errorMessage }, { status: 500 });
     }
 };
 
-// Bungkus handler dengan withAuth dan role SUPER_ADMIN
+// Bungkus handler dengan withAuth dan role SUPER_ADMIN (Perbaikan tercermin di signature handler)
 export const GET = withAuth(getUserDeductionsHandler, Role.SUPER_ADMIN);
 export const POST = withAuth(assignDeductionHandler, Role.SUPER_ADMIN);

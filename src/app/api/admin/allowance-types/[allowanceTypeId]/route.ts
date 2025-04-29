@@ -4,19 +4,21 @@ import { prisma } from '@/lib/prisma';
 import { Role, Prisma } from '@prisma/client';
 import { withAuth, AuthenticatedRequest } from '@/lib/authMiddleware'; // <-- Import
 
-// Interface untuk context params
-interface RouteContext {
-  params: { allowanceTypeId: string };
-}
-
-// Handler GET
-const getAllowanceTypeHandler = async (request: AuthenticatedRequest, context?: RouteContext) => {
+// Handler GET (Perbaikan Signature Context)
+const getAllowanceTypeHandler = async (
+    request: AuthenticatedRequest,
+    // Tambahkan '?' setelah 'params'
+    context?: { params?: { allowanceTypeId?: string | string[] } }
+) => {
     const adminUserId = request.user?.id;
-    const allowanceTypeId = context?.params?.allowanceTypeId;
+    // Validasi allowanceTypeId (optional chaining sudah benar)
+    const allowanceTypeIdParam = context?.params?.allowanceTypeId;
 
-    if (!allowanceTypeId) {
-        return NextResponse.json({ message: 'ID Jenis Tunjangan diperlukan di URL.' }, { status: 400 });
+    if (typeof allowanceTypeIdParam !== 'string') {
+        return NextResponse.json({ message: 'Format ID Jenis Tunjangan tidak valid atau tidak ditemukan di URL.' }, { status: 400 });
     }
+    const allowanceTypeId = allowanceTypeIdParam;
+
     console.log(`[API GET /admin/allowance-types/${allowanceTypeId}] Request by Admin: ${adminUserId}`);
 
     try {
@@ -38,22 +40,29 @@ const getAllowanceTypeHandler = async (request: AuthenticatedRequest, context?: 
     }
 };
 
-// Handler PUT
-const updateAllowanceTypeHandler = async (request: AuthenticatedRequest, context?: RouteContext) => {
+// Handler PUT (Perbaikan Signature Context)
+const updateAllowanceTypeHandler = async (
+    request: AuthenticatedRequest,
+    // Tambahkan '?' setelah 'params'
+    context?: { params?: { allowanceTypeId?: string | string[] } }
+) => {
     const adminUserId = request.user?.id;
     const adminEmail = request.user?.email; // untuk logging
-    const allowanceTypeId = context?.params?.allowanceTypeId;
+    // Validasi allowanceTypeId (optional chaining sudah benar)
+    const allowanceTypeIdParam = context?.params?.allowanceTypeId;
 
-    if (!allowanceTypeId) {
-        return NextResponse.json({ message: 'ID Jenis Tunjangan diperlukan di URL.' }, { status: 400 });
+    if (typeof allowanceTypeIdParam !== 'string') {
+        return NextResponse.json({ message: 'Format ID Jenis Tunjangan tidak valid atau tidak ditemukan di URL.' }, { status: 400 });
     }
+    const allowanceTypeId = allowanceTypeIdParam;
+
     console.log(`[API PUT /admin/allowance-types/${allowanceTypeId}] Request by Admin: ${adminUserId}`);
 
     try {
         const body = await request.json();
         const { name, description, isFixed } = body;
 
-        if (name === undefined && description === undefined && isFixed === undefined) { // Cek ketat undefined
+        if (name === undefined && description === undefined && isFixed === undefined) {
             return NextResponse.json({ message: 'Tidak ada data yang dikirim untuk diperbarui.' }, { status: 400 });
         }
         if (name !== undefined && (typeof name !== 'string' || name.trim() === '')) {
@@ -64,9 +73,9 @@ const updateAllowanceTypeHandler = async (request: AuthenticatedRequest, context
         }
 
         const dataToUpdate: Prisma.AllowanceTypeUpdateInput = {};
-        if (name !== undefined) dataToUpdate.name = name.trim(); // Perbarui jika ada
-        if (description !== undefined) dataToUpdate.description = description || null; // Perbarui jika ada
-        if (isFixed !== undefined) dataToUpdate.isFixed = isFixed; // Perbarui jika ada
+        if (name !== undefined) dataToUpdate.name = name.trim();
+        if (description !== undefined) dataToUpdate.description = description || null;
+        if (isFixed !== undefined) dataToUpdate.isFixed = isFixed;
 
         const updatedAllowanceType = await prisma.allowanceType.update({
             where: { id: allowanceTypeId },
@@ -81,6 +90,7 @@ const updateAllowanceTypeHandler = async (request: AuthenticatedRequest, context
 
     } catch (error: unknown) {
         console.error(`[API PUT /admin/allowance-types/${allowanceTypeId}] Error:`, error);
+        // Gunakan Prisma.PrismaClientKnownRequestError
         if (error instanceof Prisma.PrismaClientKnownRequestError) {
             if (error.code === 'P2025') {
                 return NextResponse.json({ message: `Jenis tunjangan dengan ID '${allowanceTypeId}' tidak ditemukan.` }, { status: 404 });
@@ -91,27 +101,32 @@ const updateAllowanceTypeHandler = async (request: AuthenticatedRequest, context
             if (error.code === 'P2023') { // Invalid ID format
                  return NextResponse.json({ message: 'Format ID tidak valid.' }, { status: 400 });
             }
-            // Handle other Prisma errors
             return NextResponse.json({ message: `Database error: ${error.message}`}, { status: 500 });
         }
          if (error instanceof SyntaxError) { // Body JSON tidak valid
             return NextResponse.json({ message: 'Format body request tidak valid (JSON).' }, { status: 400 });
         }
-        // Fallback error
         return NextResponse.json({ message: 'Gagal memperbarui jenis tunjangan.' }, { status: 500 });
     }
 };
 
-// Handler DELETE
-const deleteAllowanceTypeHandler = async (request: AuthenticatedRequest, context?: RouteContext) => {
+// Handler DELETE (Perbaikan Signature Context)
+const deleteAllowanceTypeHandler = async (
+    request: AuthenticatedRequest,
+    // Tambahkan '?' setelah 'params'
+    context?: { params?: { allowanceTypeId?: string | string[] } }
+) => {
     const adminUserId = request.user?.id;
     const adminEmail = request.user?.email; // untuk logging
-    const allowanceTypeId = context?.params?.allowanceTypeId;
+    // Validasi allowanceTypeId (optional chaining sudah benar)
+    const allowanceTypeIdParam = context?.params?.allowanceTypeId;
 
-     if (!allowanceTypeId) {
-        return NextResponse.json({ message: 'ID Jenis Tunjangan diperlukan di URL.' }, { status: 400 });
+    if (typeof allowanceTypeIdParam !== 'string') {
+        return NextResponse.json({ message: 'Format ID Jenis Tunjangan tidak valid atau tidak ditemukan di URL.' }, { status: 400 });
     }
-     console.log(`[API DELETE /admin/allowance-types/${allowanceTypeId}] Request by Admin: ${adminUserId}`);
+    const allowanceTypeId = allowanceTypeIdParam;
+
+    console.log(`[API DELETE /admin/allowance-types/${allowanceTypeId}] Request by Admin: ${adminUserId}`);
 
     try {
         await prisma.allowanceType.delete({
@@ -123,6 +138,7 @@ const deleteAllowanceTypeHandler = async (request: AuthenticatedRequest, context
 
     } catch (error: unknown) {
         console.error(`[API DELETE /admin/allowance-types/${allowanceTypeId}] Error:`, error);
+        // Gunakan Prisma.PrismaClientKnownRequestError
         if (error instanceof Prisma.PrismaClientKnownRequestError) {
             if (error.code === 'P2025') { // Record not found
                 return NextResponse.json({ message: `Jenis tunjangan dengan ID '${allowanceTypeId}' tidak ditemukan.` }, { status: 404 });
@@ -133,15 +149,13 @@ const deleteAllowanceTypeHandler = async (request: AuthenticatedRequest, context
             if (error.code === 'P2023') { // Invalid ID format
                  return NextResponse.json({ message: 'Format ID tidak valid.' }, { status: 400 });
             }
-            // Handle other Prisma errors
             return NextResponse.json({ message: `Database error: ${error.message}` }, { status: 500 });
         }
-        // Fallback error
         return NextResponse.json({ message: 'Gagal menghapus jenis tunjangan.' }, { status: 500 });
     }
 };
 
-// Bungkus semua handler dengan withAuth dan role SUPER_ADMIN
+// Bungkus semua handler dengan withAuth dan role SUPER_ADMIN (Bagian ini tetap sama)
 export const GET = withAuth(getAllowanceTypeHandler, Role.SUPER_ADMIN);
 export const PUT = withAuth(updateAllowanceTypeHandler, Role.SUPER_ADMIN);
 export const DELETE = withAuth(deleteAllowanceTypeHandler, Role.SUPER_ADMIN);
