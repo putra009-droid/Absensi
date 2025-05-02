@@ -1,17 +1,19 @@
 // src/app/api/attendance/clock-in/route.ts
+// Dengan perbaikan await saat memanggil getBatasTerlambat
+
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-// PERBAIKAN 1: Hapus PrismaClientKnownRequestError dari impor
-import { Prisma, AttendanceStatus } from '@prisma/client';
-import { withAuth, AuthenticatedRequest } from '@/lib/authMiddleware';
-import { getBatasTerlambat } from '@/lib/config';
+import { Prisma, AttendanceStatus } from '@prisma/client'; // Import Prisma namespace
+import { withAuth, AuthenticatedRequest } from '@/lib/authMiddleware'; // Pastikan path benar
+// Import getBatasTerlambat dari lokasi yang benar
+import { getBatasTerlambat } from '@/lib/config'; // atau '@/lib/attendanceLogic'
 // --- Impor Modul Node.js untuk File System ---
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { Buffer } from 'buffer';
 // --- Akhir Impor ---
 
-// Handler POST untuk Clock In (Handle FormData & Simpan File Lokal)
+// Handler POST untuk Clock In
 const clockInHandler = async (request: AuthenticatedRequest) => {
     const userId = request.user?.id;
     if (!userId) {
@@ -25,7 +27,7 @@ const clockInHandler = async (request: AuthenticatedRequest) => {
     let latitude: Prisma.Decimal | null = null;
     let longitude: Prisma.Decimal | null = null;
     let selfieFile: File | null = null;
-    let selfieUrl: string | null = null;
+    let selfieUrl: string | null = null; // Path relatif yang akan disimpan di DB
 
     try {
         // Baca data sebagai FormData
@@ -33,18 +35,20 @@ const clockInHandler = async (request: AuthenticatedRequest) => {
         const formData = await request.formData();
         console.log(`[API Clock-In] User ${userId}: FormData received.`);
 
+        // Ambil latitude dan longitude
         const latString = formData.get('latitude') as string | null;
         const lonString = formData.get('longitude') as string | null;
         if (latString && !isNaN(parseFloat(latString))) { latitude = new Prisma.Decimal(parseFloat(latString)); }
         if (lonString && !isNaN(parseFloat(lonString))) { longitude = new Prisma.Decimal(parseFloat(lonString)); }
         console.log(`[API Clock-In] User ${userId} location from FormData: Lat=${latitude}, Long=${longitude}`);
 
+        // Ambil file selfie
         const selfieField = formData.get('selfie');
         if (selfieField instanceof File) {
             selfieFile = selfieField;
             console.log(`[API Clock-In] User ${userId} sent a selfie file: Name=${selfieFile.name}, Size=${selfieFile.size}, Type=${selfieFile.type}`);
 
-            // Logika Penyimpanan File Lokal
+            // --- Logika Penyimpanan File Lokal ---
             try {
                 const fileBuffer = Buffer.from(await selfieFile.arrayBuffer());
                 const timestamp = Date.now();
@@ -52,19 +56,25 @@ const clockInHandler = async (request: AuthenticatedRequest) => {
                 const uniqueFileName = `clockin-${userId}-${timestamp}.${fileExtension}`;
                 const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'selfies', 'clockin');
                 const filePath = path.join(uploadDir, uniqueFileName);
+
                 await mkdir(uploadDir, { recursive: true });
                 await writeFile(filePath, fileBuffer);
                 console.log(`[API Clock-In] Selfie file saved to: ${filePath}`);
+
+                // Set selfieUrl sebagai path relatif
                 selfieUrl = `/uploads/selfies/clockin/${uniqueFileName}`;
                 console.log(`[API Clock-In] Relative Selfie URL set to: ${selfieUrl}`);
+
             } catch (uploadError) {
                 console.error(`[API Clock-In] User ${userId}: Failed to save selfie file!`, uploadError);
-                selfieUrl = null;
+                selfieUrl = null; // Set null jika gagal
             }
+            // --- Akhir Logika Penyimpanan File ---
+
         } else if (selfieField) {
              console.warn(`[API Clock-In] User ${userId}: 'selfie' field received but is not a File. Type: ${typeof selfieField}`);
         } else {
-            console.log(`[API Clock-In] User ${userId} did not send a 'selfie' file.`);
+             console.log(`[API Clock-In] User ${userId} did not send a 'selfie' file.`);
         }
 
     } catch (e) {
@@ -76,14 +86,17 @@ const clockInHandler = async (request: AuthenticatedRequest) => {
         const existingRecord = await prisma.attendanceRecord.findFirst({
             where: {
                 userId: userId, clockIn: { gte: todayStart },
-                status: { in: [ AttendanceStatus.HADIR, AttendanceStatus.TERLAMBAT, AttendanceStatus.SELESAI, AttendanceStatus.IZIN, AttendanceStatus.SAKIT, AttendanceStatus.CUTI ] }
+                status: { in: [ AttendanceStatus.HADIR, AttendanceStatus.TERLAMBAT, AttendanceStatus.SELESAI, AttendanceStatus.IZIN, AttendanceStatus.SAKIT, AttendanceStatus.CUTI, AttendanceStatus.ALPHA ] }
             }, select: { status: true }
         });
         if (existingRecord) { return NextResponse.json( { success: false, message: `Anda sudah tercatat ${existingRecord.status} hari ini.` }, { status: 409 } ); }
 
-        // Penentuan status awal
-        const batasTerlambat = getBatasTerlambat(now);
+        // ===> PERBAIKAN: Tambahkan await di sini <===
+        // Penentuan status awal (HADIR/TERLAMBAT)
+        const batasTerlambat = await getBatasTerlambat(now); // Tunggu hasil Promise<Date>
+        // Sekarang batasTerlambat adalah Date, perbandingan bisa dilakukan
         const initialStatus = now > batasTerlambat ? AttendanceStatus.TERLAMBAT : AttendanceStatus.HADIR;
+        // ===> AKHIR PERBAIKAN <===
         console.log(`[API Clock-In] User ${userId} - Initial Status Determined: ${initialStatus}`);
 
         // Buat record baru
@@ -116,28 +129,15 @@ const clockInHandler = async (request: AuthenticatedRequest) => {
             }
         }, { status: 201 });
 
-    // PERBAIKAN 2: Penanganan error 'unknown'
-    } catch (error: unknown) {
+    } catch (error) {
         console.error(`[CLOCK_IN_ERROR] User ${userId}:`, error);
-
-        let errorMessage = 'Terjadi kesalahan sistem saat clock in.'; // Default
-        let errorCode: string | undefined = undefined;
-
-        // Gunakan Prisma.PrismaClientKnownRequestError
         if (error instanceof Prisma.PrismaClientKnownRequestError) {
-            errorMessage = `Database error saat clock in: ${error.message}`;
-            errorCode = error.code;
-            // Cek kode spesifik jika perlu
-            if (error.code === 'P2022') { /* ... error handling spesifik P2022 ... */ }
-            // Kembalikan error DB
-            return NextResponse.json({ success: false, message: errorMessage, code: errorCode }, { status: 500 });
-        } else if (error instanceof Error) { // Tangani error JS standar
-            errorMessage = error.message;
+            return NextResponse.json({ success: false, message: 'Database error saat clock in.', code: error.code }, { status: 500 });
         }
-        // Kembalikan error umum
-        return NextResponse.json({ success: false, message: errorMessage }, { status: 500 });
+        const errorMessage = error instanceof Error ? error.message : 'Unknown system error during clock in.';
+        return NextResponse.json({ success: false, message: `Terjadi kesalahan sistem saat clock in: ${errorMessage}` }, { status: 500 });
     }
 };
 
-// Bungkus handler dengan middleware autentikasi (tetap sama)
-export const POST = withAuth(clockInHandler);
+// Bungkus handler dengan middleware autentikasi
+export const POST = withAuth(clockInHandler); // Tidak perlu role spesifik
