@@ -2,7 +2,7 @@
 
 export const WAKTU_SERVER = 'Asia/Makassar'; // Sesuaikan dengan zona waktu server/lokasi Anda (WITA)
 
-export const JAM_MASUK = 8;
+export const JAM_MASUK = 10;
 export const MENIT_MASUK = 0;
 export const MENIT_TOLERANSI_TERLAMBAT = 15;
 

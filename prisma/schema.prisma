@@ -1,5 +1,5 @@
 // File Lokasi: prisma/schema.prisma
-// Versi dengan penambahan @@map untuk konsistensi nama tabel
+// Versi lengkap dengan model AttendanceSetting dan @@map
 
 // Konfigurasi generator Prisma Client
 generator client {
@@ -51,14 +51,10 @@ enum PayrollRunStatus {
   PENDING_APPROVAL // Menunggu Persetujuan Yayasan
   APPROVED         // Disetujui oleh Yayasan
   REJECTED         // Ditolak oleh Yayasan
-  // PROCESSING // Dihapus jika tidak relevan
-  // COMPLETED // Dihapus jika tidak relevan
-  // COMPLETED_WITH_ERRORS // Dihapus jika tidak relevan
 }
 
 
 // --- Model untuk NextAuth Adapter (Opsional) ---
-// Jika Anda tidak menggunakan NextAuth.js, bagian ini bisa dihapus
 model Account {
   id                String  @id @default(cuid()) @db.VarChar(191)
   userId            String  @db.VarChar(191)
@@ -76,7 +72,7 @@ model Account {
 
   @@unique([provider, providerAccountId])
   @@index([userId])
-  @@map("accounts") // Map ke nama tabel 'accounts' (sudah benar)
+  @@map("accounts")
 }
 
 model Session {
@@ -87,7 +83,7 @@ model Session {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@map("sessions") // Map ke nama tabel 'sessions' (sudah benar)
+  @@map("sessions")
 }
 
 model VerificationToken {
@@ -96,7 +92,7 @@ model VerificationToken {
   expires    DateTime @db.DateTime(3)
 
   @@unique([identifier, token])
-  @@map("verification_tokens") // Map ke nama tabel 'verification_tokens' (sudah benar)
+  @@map("verification_tokens")
 }
 // --- Akhir Model NextAuth ---
 
@@ -115,8 +111,8 @@ model User {
   baseSalary        Decimal?  @db.Decimal(15, 2)
 
   // Relasi ke model lain
-  accounts          Account[] // Hanya jika menggunakan NextAuth
-  sessions          Session[] // Hanya jika menggunakan NextAuth
+  accounts          Account[]
+  sessions          Session[]
   attendanceRecords AttendanceRecord[]
   allowances        UserAllowance[]
   deductions        UserDeduction[]
@@ -128,46 +124,46 @@ model User {
   rejectedPayrollRuns PayrollRun[] @relation("RejectedPayrollRuns")
   payslips          Payslip[]
 
-  @@map("users") // Map ke nama tabel 'users' (sudah benar)
+  @@map("users")
 }
 
 
 // --- Model Catatan Absensi ---
 model AttendanceRecord {
-  id            String   @id @default(cuid()) @db.VarChar(191)
-  clockIn       DateTime @db.DateTime(3)
-  clockOut      DateTime? @db.DateTime(3)
-  createdAt     DateTime @default(now()) @db.DateTime(3)
-  updatedAt     DateTime @updatedAt @db.DateTime(3)
-  userId        String   @db.VarChar(191)
-  latitudeIn    Decimal? @db.Decimal(9, 6)
-  longitudeIn   Decimal? @db.Decimal(9, 6)
-  latitudeOut   Decimal? @db.Decimal(9, 6)
-  longitudeOut  Decimal? @db.Decimal(9, 6)
+  id            String           @id @default(cuid()) @db.VarChar(191)
+  clockIn       DateTime         @db.DateTime(3)
+  clockOut      DateTime?        @db.DateTime(3)
+  createdAt     DateTime         @default(now()) @db.DateTime(3)
+  updatedAt     DateTime         @updatedAt @db.DateTime(3)
+  userId        String           @db.VarChar(191)
+  latitudeIn    Decimal?         @db.Decimal(9, 6)
+  longitudeIn   Decimal?         @db.Decimal(9, 6)
+  latitudeOut   Decimal?         @db.Decimal(9, 6)
+  longitudeOut  Decimal?         @db.Decimal(9, 6)
   status        AttendanceStatus @default(HADIR)
-  selfieInUrl   String?  @db.Text
-  selfieOutUrl  String?  @db.Text
-  notes         String?  @db.Text
+  selfieInUrl   String?          @db.Text
+  selfieOutUrl  String?          @db.Text
+  notes         String?          @db.Text
 
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, clockIn])
   @@index([userId, status])
-  @@map("attendance_records") // Map ke nama tabel 'attendance_records' (sudah benar)
+  @@map("attendance_records")
 }
 
 
 // --- Model Tunjangan ---
 model AllowanceType {
-  id             String  @id @default(cuid()) @db.VarChar(191)
-  name           String  @unique @db.VarChar(191)
-  description    String? @db.Text
-  isFixed        Boolean @default(true)
-  createdAt      DateTime @default(now()) @db.DateTime(3)
-  updatedAt      DateTime @updatedAt @db.DateTime(3)
+  id             String        @id @default(cuid()) @db.VarChar(191)
+  name           String        @unique @db.VarChar(191)
+  description    String?       @db.Text
+  isFixed        Boolean       @default(true)
+  createdAt      DateTime      @default(now()) @db.DateTime(3)
+  updatedAt      DateTime      @updatedAt @db.DateTime(3)
   userAllowances UserAllowance[]
 
-  @@map("allowance_types") // Map ke nama tabel 'allowance_types' (sudah benar)
+  @@map("allowance_types")
 }
 
 model UserAllowance {
@@ -181,7 +177,7 @@ model UserAllowance {
   updatedAt       DateTime      @updatedAt @db.DateTime(3)
 
   @@unique([userId, allowanceTypeId])
-  @@map("user_allowances") // Map ke nama tabel 'user_allowances' (sudah benar)
+  @@map("user_allowances")
   @@index([userId])
   @@index([allowanceTypeId])
 }
@@ -200,7 +196,7 @@ model DeductionType {
   updatedAt        DateTime                 @updatedAt @db.DateTime(3)
   userDeductions   UserDeduction[]
 
-  @@map("deduction_types") // Map ke nama tabel 'deduction_types' (sudah benar)
+  @@map("deduction_types")
 }
 
 model UserDeduction {
@@ -215,7 +211,7 @@ model UserDeduction {
   updatedAt          DateTime      @updatedAt @db.DateTime(3)
 
   @@unique([userId, deductionTypeId])
-  @@map("user_deductions") // Map ke nama tabel 'user_deductions' (sudah benar)
+  @@map("user_deductions")
   @@index([userId])
   @@index([deductionTypeId])
 }
@@ -224,7 +220,7 @@ model UserDeduction {
 // --- Model Refresh Token JWT ---
 model RefreshToken {
   id        String    @id @default(cuid()) @db.VarChar(191)
-  jti       String    @unique // JWT ID
+  jti       String    @unique
   userId    String    @db.VarChar(191)
   user      User      @relation("UserRefreshTokens", fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime  @db.DateTime(3)
@@ -233,7 +229,7 @@ model RefreshToken {
 
   @@index([userId])
   @@index([userId, jti])
-  @@map("refresh_tokens") // Map ke nama tabel 'refresh_tokens'
+  @@map("refresh_tokens")
 }
 
 
@@ -265,7 +261,7 @@ model PayrollRun {
 
   @@index([status])
   @@index([periodStart, periodEnd])
-  @@map("payroll_runs") // Map ke nama tabel 'payroll_runs' (sudah benar)
+  @@map("payroll_runs")
 }
 
 model Payslip {
@@ -292,7 +288,7 @@ model Payslip {
   @@unique([payrollRunId, userId])
   @@index([userId])
   @@index([payrollRunId])
-  @@map("payslips") // Map ke nama tabel 'payslips'
+  @@map("payslips")
 }
 
 model PayslipItem {
@@ -304,7 +300,21 @@ model PayslipItem {
   amount      Decimal   @db.Decimal(15, 2)
 
   @@index([payslipId])
-  @@map("payslip_items") // Map ke nama tabel 'payslip_items'
+  @@map("payslip_items")
 }
-
 // === AKHIR MODEL PAYROLL ===
+
+// === MODEL BARU UNTUK PENGATURAN ABSENSI ===
+model AttendanceSetting {
+  id                  String @id @default("global_settings") @db.VarChar(191)
+
+  workStartTimeHour   Int    @default(8)   // Jam mulai kerja (0-23)
+  workStartTimeMinute Int    @default(0)   // Menit mulai kerja (0-59)
+  lateToleranceMinutes Int   @default(15)  // Toleransi keterlambatan dalam menit
+
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  updatedAt           DateTime @updatedAt @db.DateTime(3)
+
+  @@map("attendance_settings") // Nama tabel di database
+}
+// === AKHIR MODEL BARU ===
