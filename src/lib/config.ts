@@ -7,8 +7,8 @@ import { prisma } from '@/lib/prisma'; // Pastikan prisma diimpor dari lokasi ya
 export const WAKTU_SERVER = 'Asia/Makassar'; // Sesuaikan jika perlu
 
 // --- Nilai Default (Digunakan jika DB error atau belum ada setting) ---
-const DEFAULT_JAM_MASUK = 8; // Default jika tidak ada di DB
-const DEFAULT_MENIT_MASUK = 0;
+const DEFAULT_JAM_MASUK = 10; // Default jika tidak ada di DB
+const DEFAULT_MENIT_MASUK = 15;
 const DEFAULT_TOLERANSI_MENIT = 15;
 const SETTINGS_ID = "global_settings"; // ID tetap untuk pengaturan global
 
