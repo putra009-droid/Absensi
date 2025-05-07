@@ -2,23 +2,16 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma'; // Pastikan path ke prisma client benar
-import { Prisma, AttendanceStatus, Role } from '@prisma/client'; // Impor enum yang relevan
+// --- Pastikan semua enum ini ada di schema.prisma dan sudah di-generate ---
+import { Prisma, AttendanceStatus, LeaveRequestStatus, Role } from '@prisma/client';
+// --- Akhir impor enum ---
 import { withAuth, AuthenticatedRequest } from '@/lib/authMiddleware'; // Middleware autentikasi Anda
 import { writeFile, mkdir } from 'fs/promises'; // Untuk handle file upload
 import path from 'path';
 import { Buffer } from 'buffer';
 
-// Definisikan tipe data yang diharapkan dari request body (FormData)
-interface LeaveRequestBody {
-  leaveType: string; // Akan berupa 'IZIN', 'SAKIT', 'CUTI'
-  startDate: string; // Format YYYY-MM-DD
-  endDate: string;   // Format YYYY-MM-DD
-  reason: string;
-  attachment?: File; // Opsional
-}
 
-// Handler untuk metode POST
-async function handleLeaveRequest(request: AuthenticatedRequest) {
+async function handleLeaveSubmission(request: AuthenticatedRequest) {
   const userId = request.user?.id;
 
   if (!userId) {
@@ -44,9 +37,9 @@ async function handleLeaveRequest(request: AuthenticatedRequest) {
       );
     }
 
-    // Validasi tipe izin
+    // Validasi dan konversi tipe izin dari string ke enum AttendanceStatus
     let leaveTypeEnumValue: AttendanceStatus;
-    switch (leaveTypeString.toUpperCase()) {
+    switch (leaveTypeString.toUpperCase()) { // Cocokkan dengan nama enum di Flutter
       case 'IZIN':
         leaveTypeEnumValue = AttendanceStatus.IZIN;
         break;
@@ -76,115 +69,69 @@ async function handleLeaveRequest(request: AuthenticatedRequest) {
       try {
         const fileBuffer = Buffer.from(await attachmentFile.arrayBuffer());
         const timestamp = Date.now();
-        const fileExtension = attachmentFile.name.split('.').pop() || 'bin'; // Default extension
-        // Buat nama file unik, misalnya berdasarkan userId dan timestamp
+        const fileExtension = attachmentFile.name.split('.').pop() || 'bin';
         const uniqueFileName = `leave-${userId}-${timestamp}.${fileExtension}`;
-        // Tentukan direktori upload (pastikan folder ini ada atau bisa dibuat)
         const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'leave_attachments');
         const filePath = path.join(uploadDir, uniqueFileName);
 
-        // Buat direktori jika belum ada
         await mkdir(uploadDir, { recursive: true });
-        // Tulis file ke server
         await writeFile(filePath, fileBuffer);
-        console.log(`[API Leave Request] Attachment file saved to: ${filePath}`);
-
-        // Simpan path relatif untuk diakses via URL
-        attachmentUrl = `/uploads/leave_attachments/${uniqueFileName}`;
+        console.log(`[API Submit Leave] Attachment saved: ${filePath}`);
+        attachmentUrl = `/uploads/leave_attachments/${uniqueFileName}`; // Path relatif
       } catch (uploadError) {
-        console.error(`[API Leave Request] User ${userId}: Failed to save attachment file!`, uploadError);
+        console.error(`[API Submit Leave] User ${userId}: Failed to save attachment file!`, uploadError);
         // Gagal upload attachment tidak menghentikan proses, tapi attachmentUrl akan null
       }
     }
 
-    // Simpan pengajuan izin ke database (contoh, Anda mungkin perlu tabel terpisah `LeaveRequest`)
-    // Untuk contoh ini, kita akan langsung mencoba membuat/mengupdate AttendanceRecord
-    // Ini adalah penyederhanaan, idealnya ada tabel LeaveRequest dengan status approval
+    // Buat record baru di tabel LeaveRequest
+    const newLeaveRequest = await prisma.leaveRequest.create({
+      data: {
+        userId: userId,
+        leaveType: leaveTypeEnumValue, // Simpan sebagai enum AttendanceStatus
+        startDate: startDate,
+        endDate: endDate,
+        reason: reason.trim(),
+        attachmentUrl: attachmentUrl,
+        status: LeaveRequestStatus.PENDING_APPROVAL, // Status awal menunggu persetujuan
+        requestedAt: new Date(),
+      },
+    });
 
-    const datesToUpdate: Date[] = [];
-    let currentDate = new Date(startDate);
-    while (currentDate.getTime() <= endDate.getTime()) {
-      datesToUpdate.push(new Date(currentDate));
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-
-    // Proses setiap tanggal dalam rentang izin
-    // Ini adalah logika yang sangat disederhanakan.
-    // Idealnya, Anda membuat record di tabel 'LeaveRequest' dengan status PENDING,
-    // lalu Admin/HR yang akan menyetujui dan mengubah AttendanceRecord.
-    // Untuk sekarang, kita asumsikan pengajuan langsung mengubah status.
-    const results = [];
-    for (const date of datesToUpdate) {
-      const dayStart = new Date(date);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(date);
-      dayEnd.setHours(23, 59, 59, 999);
-
-      // Cek apakah sudah ada record absensi untuk hari itu
-      const existingRecord = await prisma.attendanceRecord.findFirst({
-        where: {
-          userId: userId,
-          clockIn: { // Cek apakah clockIn ada di hari tersebut
-            gte: dayStart,
-            lt: dayEnd,
-          },
-        },
-      });
-
-      if (existingRecord) {
-        // Jika sudah ada record (misal sudah clock-in atau status lain), update statusnya
-        // Ini mungkin perlu kebijakan khusus, misal tidak boleh ajukan izin jika sudah clock-in.
-        // Untuk contoh: kita update saja.
-        const updated = await prisma.attendanceRecord.update({
-          where: { id: existingRecord.id },
-          data: {
-            status: leaveTypeEnumValue,
-            notes: `Pengajuan ${leaveTypeString}: ${reason}${attachmentUrl ? ` (Lampiran: ${attachmentUrl})` : ''}`,
-            // Kosongkan clockIn/Out jika ini adalah izin/sakit/cuti penuh hari? Tergantung kebijakan.
-            // clockOut: null, // Contoh
-          },
-        });
-        results.push({ date: date.toISOString().split('T')[0], status: 'updated', recordId: updated.id });
-      } else {
-        // Jika belum ada record, buat record baru dengan status izin/sakit/cuti
-        // ClockIn di-set ke awal hari, clockOut bisa null
-        const created = await prisma.attendanceRecord.create({
-          data: {
-            userId: userId,
-            clockIn: dayStart, // Atau waktu spesifik jika relevan
-            status: leaveTypeEnumValue,
-            notes: `Pengajuan ${leaveTypeString}: ${reason}${attachmentUrl ? ` (Lampiran: ${attachmentUrl})` : ''}`,
-            selfieInUrl: attachmentUrl, // Simpan URL attachment di sini jika relevan
-          },
-        });
-        results.push({ date: date.toISOString().split('T')[0], status: 'created', recordId: created.id });
-      }
-    }
-
-    console.log(`[API Leave Request] User ${userId} submitted leave request. Results:`, results);
+    console.log(`[API Submit Leave] User ${userId} submitted new leave request ID: ${newLeaveRequest.id}`);
 
     return NextResponse.json(
-      { success: true, message: 'Pengajuan izin berhasil dikirim dan sedang diproses.', data: results },
-      { status: 201 } // 201 Created atau 200 OK
+      { success: true, message: 'Pengajuan izin berhasil dikirim dan menunggu persetujuan.', leaveRequestId: newLeaveRequest.id },
+      { status: 201 }
     );
 
   } catch (error: unknown) {
-    console.error('[API Leave Request] Error:', error);
+    console.error('[API Submit Leave] Error:', error);
     let errorMessage = 'Terjadi kesalahan pada server saat memproses pengajuan izin.';
     if (error instanceof Error) {
         errorMessage = error.message;
     }
+    // Tangani error spesifik jika perlu, misalnya jika body JSON tidak valid
     if (error instanceof SyntaxError) { // Jika error parsing FormData
         errorMessage = 'Format data permintaan tidak valid.';
         return NextResponse.json({ success: false, message: errorMessage }, { status: 400 });
     }
+    // Tangani error Prisma (misalnya, relasi tidak ditemukan)
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        // Contoh: P2003 adalah error foreign key constraint
+        if (error.code === 'P2003') {
+            errorMessage = 'Data pengguna atau referensi lain tidak valid.';
+            return NextResponse.json({ success: false, message: errorMessage, code: error.code }, { status: 400 });
+        }
+    }
+
     return NextResponse.json(
       { success: false, message: errorMessage },
-      { status: 500 }
+      { status: 500 } // 500 Internal Server Error
     );
   }
 }
 
 // Bungkus handler dengan middleware autentikasi
-// Hanya metode POST yang diizinkan untuk endpoint ini
-export const POST = withAuth(handleLeaveRequest);
+// Semua pengguna terautentikasi bisa mengajukan izin
+export const POST = withAuth(handleLeaveSubmission);
