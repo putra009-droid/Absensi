@@ -63,19 +63,19 @@ enum LeaveRequestStatus {
 
 // --- Model untuk NextAuth Adapter (Opsional) ---
 model Account {
-  id                String  @id @default(cuid()) @db.VarChar(191)
-  userId            String  @db.VarChar(191)
-  type              String  @db.VarChar(191)
-  provider          String  @db.VarChar(191)
-  providerAccountId String  @db.VarChar(191)
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
-  expires_at        Int?
-  token_type        String? @db.VarChar(191)
-  scope             String? @db.VarChar(191)
-  id_token          String? @db.Text
-  session_state     String? @db.VarChar(191)
-  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                  String  @id @default(cuid()) @db.VarChar(191)
+  userId              String  @db.VarChar(191)
+  type                String  @db.VarChar(191)
+  provider            String  @db.VarChar(191)
+  providerAccountId   String  @db.VarChar(191)
+  refresh_token       String? @db.Text
+  access_token        String? @db.Text
+  expires_at          Int?
+  token_type          String? @db.VarChar(191)
+  scope               String? @db.VarChar(191)
+  id_token            String? @db.Text
+  session_state       String? @db.VarChar(191)
+  user                User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
   @@index([userId])
@@ -142,22 +142,33 @@ model User {
 
 // --- Model Catatan Absensi ---
 model AttendanceRecord {
-  id             String           @id @default(cuid()) @db.VarChar(191)
-  clockIn        DateTime         @db.DateTime(3)
-  clockOut       DateTime?        @db.DateTime(3)
-  createdAt      DateTime         @default(now()) @db.DateTime(3)
-  updatedAt      DateTime         @updatedAt @db.DateTime(3)
-  userId         String           @db.VarChar(191)
-  latitudeIn     Decimal?         @db.Decimal(9, 6)
-  longitudeIn    Decimal?         @db.Decimal(9, 6)
-  latitudeOut    Decimal?         @db.Decimal(9, 6)
-  longitudeOut   Decimal?         @db.Decimal(9, 6)
-  status         AttendanceStatus @default(HADIR)
-  selfieInUrl    String?          @db.Text
-  selfieOutUrl   String?          @db.Text
-  notes          String?          @db.Text
+  id                String    @id @default(cuid()) @db.VarChar(191)
+  clockIn           DateTime  @db.DateTime(3)
+  clockOut          DateTime? @db.DateTime(3)
+  createdAt         DateTime  @default(now()) @db.DateTime(3)
+  updatedAt         DateTime  @updatedAt @db.DateTime(3)
+  userId            String    @db.VarChar(191)
+  
+  latitudeIn        Decimal?  @db.Decimal(9, 6) 
+  longitudeIn       Decimal?  @db.Decimal(9, 6) 
+  latitudeOut       Decimal?  @db.Decimal(9, 6) 
+  longitudeOut      Decimal?  @db.Decimal(9, 6) 
+  
+  status            AttendanceStatus @default(HADIR) 
+  selfieInUrl       String?   @db.Text             
+  selfieOutUrl      String?   @db.Text             
+  notes             String?   @db.Text             
 
-  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // --- FIELD BARU UNTUK INFO PERANGKAT & FAKE GPS ---
+  deviceModel       String?   // Model HP, contoh: "SM-A525F", "iPhone13,2"
+  deviceOS          String?   // Sistem Operasi & Versi, contoh: "Android 13", "iOS 16.5"
+  isMockLocationIn  Boolean?  @default(false) // Flag dari Flutter saat clock-in
+  gpsAccuracyIn     Decimal?  @db.Decimal(10, 2) // Akurasi GPS clock-in (meter)
+  isMockLocationOut Boolean?  @default(false) // Flag dari Flutter saat clock-out
+  gpsAccuracyOut    Decimal?  @db.Decimal(10, 2) // Akurasi GPS clock-out (meter)
+  // --- AKHIR FIELD BARU ---
+
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, clockIn])
   @@index([userId, status])
@@ -197,16 +208,16 @@ model UserAllowance {
 
 // --- Model Potongan ---
 model DeductionType {
-  id               String                   @id @default(cuid()) @db.VarChar(191)
-  name             String                   @unique @db.VarChar(191)
-  description      String?                  @db.Text
-  calculationType  DeductionCalculationType // Enum tipe kalkulasi
-  ruleAmount       Decimal?                 @db.Decimal(15, 2) // Untuk tipe FIXED atau PER_DAY/INSTANCE
-  rulePercentage   Decimal?                 @db.Decimal(5, 2)  // Untuk tipe PERCENTAGE (0-100)
-  isMandatory      Boolean?                 @default(false)
-  createdAt        DateTime                 @default(now()) @db.DateTime(3)
-  updatedAt        DateTime                 @updatedAt @db.DateTime(3)
-  userDeductions   UserDeduction[]
+  id                 String                   @id @default(cuid()) @db.VarChar(191)
+  name               String                   @unique @db.VarChar(191)
+  description        String?                  @db.Text
+  calculationType    DeductionCalculationType // Enum tipe kalkulasi
+  ruleAmount         Decimal?                 @db.Decimal(15, 2) // Untuk tipe FIXED atau PER_DAY/INSTANCE
+  rulePercentage     Decimal?                 @db.Decimal(5, 2)  // Untuk tipe PERCENTAGE (0-100)
+  isMandatory        Boolean?                 @default(false)
+  createdAt          DateTime                 @default(now()) @db.DateTime(3)
+  updatedAt          DateTime                 @updatedAt @db.DateTime(3)
+  userDeductions     UserDeduction[]
 
   @@map("deduction_types")
 }
@@ -277,25 +288,25 @@ model PayrollRun {
 }
 
 model Payslip {
-  id             String   @id @default(cuid()) @db.VarChar(191)
-  payrollRunId   String   @db.VarChar(191)
-  payrollRun     PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
-  userId         String   @db.VarChar(191)
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String        @id @default(cuid()) @db.VarChar(191)
+  payrollRunId   String        @db.VarChar(191)
+  payrollRun     PayrollRun    @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  userId         String        @db.VarChar(191)
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  baseSalary     Decimal  @db.Decimal(15, 2)
-  totalAllowance Decimal  @default(0) @db.Decimal(15, 2)
-  grossPay       Decimal  @default(0) @db.Decimal(15, 2)
-  totalDeduction Decimal  @default(0) @db.Decimal(15, 2)
-  netPay         Decimal  @default(0) @db.Decimal(15, 2)
+  baseSalary     Decimal       @db.Decimal(15, 2)
+  totalAllowance Decimal       @default(0) @db.Decimal(15, 2)
+  grossPay       Decimal       @default(0) @db.Decimal(15, 2)
+  totalDeduction Decimal       @default(0) @db.Decimal(15, 2)
+  netPay         Decimal       @default(0) @db.Decimal(15, 2)
 
-  attendanceDays Int      @default(0) // Jumlah hari hadir aktual
-  lateDays       Int      @default(0) // Jumlah hari terlambat
-  alphaDays      Int      @default(0) // Jumlah hari alpha
+  attendanceDays Int           @default(0) // Jumlah hari hadir aktual
+  lateDays       Int           @default(0) // Jumlah hari terlambat
+  alphaDays      Int           @default(0) // Jumlah hari alpha
 
   items          PayslipItem[] // Rincian item tunjangan/potongan
-  createdAt      DateTime @default(now()) @db.DateTime(3)
-  updatedAt      DateTime @updatedAt @db.DateTime(3)
+  createdAt      DateTime      @default(now()) @db.DateTime(3)
+  updatedAt      DateTime      @updatedAt @db.DateTime(3)
 
   @@unique([payrollRunId, userId]) // Satu user hanya punya satu payslip per payroll run
   @@index([userId])
@@ -348,11 +359,11 @@ model LeaveRequest {
 
 // === MODEL BARU UNTUK PENGATURAN ABSENSI ===
 model AttendanceSetting {
-  id                   String @id @default("global_settings") @db.VarChar(191) // ID tetap agar hanya ada 1 record
+  id                   String   @id @default("global_settings") @db.VarChar(191) // ID tetap agar hanya ada 1 record
 
-  workStartTimeHour    Int    @default(8)  // Jam mulai kerja (0-23)
-  workStartTimeMinute  Int    @default(0)  // Menit mulai kerja (0-59)
-  lateToleranceMinutes Int    @default(15) // Toleransi keterlambatan dalam menit
+  workStartTimeHour    Int      @default(8)  // Jam mulai kerja (0-23)
+  workStartTimeMinute  Int      @default(0)  // Menit mulai kerja (0-59)
+  lateToleranceMinutes Int      @default(15) // Toleransi keterlambatan dalam menit
 
   createdAt            DateTime @default(now()) @db.DateTime(3)
   updatedAt            DateTime @updatedAt @db.DateTime(3)
