@@ -1,5 +1,4 @@
 // File Lokasi: prisma/schema.prisma
-// Versi lengkap dengan model AttendanceSetting dan @@map
 
 // Konfigurasi generator Prisma Client
 generator client {
@@ -114,7 +113,7 @@ model User {
   updatedAt           DateTime  @updatedAt @db.DateTime(3)
   role                Role      @default(EMPLOYEE)
   emailVerified       DateTime? @db.DateTime(3)
-  image               String?   @db.VarChar(191) // <-- GUNAKAN FIELD INI UNTUK FOTO PROFIL
+  image               String?   @db.VarChar(191) // Field untuk foto profil
   baseSalary          Decimal?  @db.Decimal(15, 2)
 
   // Relasi ke model lain
@@ -132,8 +131,8 @@ model User {
   payslips            Payslip[]
 
   // Relasi ke LeaveRequest
-  leaveRequests         LeaveRequest[] @relation("UserLeaveRequests") // Pengajuan yang dibuat user ini
-  processedLeaveRequests LeaveRequest[] @relation("ProcessedLeaveRequests") // Pengajuan yang diproses user ini (jika user ini Yayasan)
+  leaveRequests         LeaveRequest[] @relation("UserLeaveRequests")
+  processedLeaveRequests LeaveRequest[] @relation("ProcessedLeaveRequests")
 
   @@map("users")
 }
@@ -155,12 +154,12 @@ model AttendanceRecord {
   selfieInUrl       String?          @db.Text
   selfieOutUrl      String?          @db.Text
   notes             String?          @db.Text
-  deviceModel       String?          // Model HP, contoh: "SM-A525F", "iPhone13,2"
-  deviceOS          String?          // Sistem Operasi & Versi, contoh: "Android 13", "iOS 16.5"
-  isMockLocationIn  Boolean?         @default(false) // Flag dari Flutter saat clock-in
-  gpsAccuracyIn     Decimal?         @db.Decimal(10, 2) // Akurasi GPS clock-in (meter)
-  isMockLocationOut Boolean?         @default(false) // Flag dari Flutter saat clock-out
-  gpsAccuracyOut    Decimal?         @db.Decimal(10, 2) // Akurasi GPS clock-out (meter)
+  deviceModel       String?
+  deviceOS          String?
+  isMockLocationIn  Boolean?         @default(false)
+  gpsAccuracyIn     Decimal?         @db.Decimal(10, 2)
+  isMockLocationOut Boolean?         @default(false)
+  gpsAccuracyOut    Decimal?         @db.Decimal(10, 2)
 
   user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -339,15 +338,25 @@ model LeaveRequest {
 // === AKHIR MODEL PENGAJUAN IZIN ===
 
 
-// === MODEL BARU UNTUK PENGATURAN ABSENSI ===
+// === MODEL UNTUK PENGATURAN ABSENSI (DENGAN PENAMBAHAN JAM SELESAI) ===
 model AttendanceSetting {
-  id                 String   @id @default("global_settings") @db.VarChar(191)
-  workStartTimeHour    Int      @default(8)
-  workStartTimeMinute  Int      @default(0)
-  lateToleranceMinutes Int      @default(15)
+  id                   String   @id @default("global_settings") @db.VarChar(191) // ID tetap agar hanya ada 1 record
+
+  workStartTimeHour    Int      @default(8)  // Jam mulai kerja (0-23)
+  workStartTimeMinute  Int      @default(0)  // Menit mulai kerja (0-59)
+  lateToleranceMinutes Int      @default(15) // Toleransi keterlambatan dalam menit
+
+  workEndTimeHour      Int      @default(17) // Jam selesai kerja (0-23) <-- FIELD BARU
+  workEndTimeMinute    Int      @default(0)  // Menit selesai kerja (0-59) <-- FIELD BARU
+
+  // Opsi tambahan yang mungkin berguna nanti:
+  // allowClockInAfterEndTime Boolean @default(false) // Izinkan clock in setelah jam kerja selesai?
+  // allowClockOutBeforeEndTime Boolean @default(true) // Izinkan clock out sebelum jam kerja selesai? (mungkin dengan catatan)
+  // minimumWorkDurationMinutes Int? // Durasi kerja minimum dalam menit
+
   createdAt            DateTime @default(now()) @db.DateTime(3)
   updatedAt            DateTime @updatedAt @db.DateTime(3)
 
-  @@map("attendance_settings")
+  @@map("attendance_settings") // Nama tabel di database
 }
-// === AKHIR MODEL BARU ===
+// === AKHIR MODEL PENGATURAN ABSENSI ===
