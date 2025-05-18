@@ -63,19 +63,19 @@ enum LeaveRequestStatus {
 
 // --- Model untuk NextAuth Adapter (Opsional) ---
 model Account {
-  id                  String  @id @default(cuid()) @db.VarChar(191)
-  userId              String  @db.VarChar(191)
-  type                String  @db.VarChar(191)
-  provider            String  @db.VarChar(191)
-  providerAccountId   String  @db.VarChar(191)
-  refresh_token       String? @db.Text
-  access_token        String? @db.Text
-  expires_at          Int?
-  token_type          String? @db.VarChar(191)
-  scope               String? @db.VarChar(191)
-  id_token            String? @db.Text
-  session_state       String? @db.VarChar(191)
-  user                User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String  @id @default(cuid()) @db.VarChar(191)
+  userId            String  @db.VarChar(191)
+  type              String  @db.VarChar(191)
+  provider          String  @db.VarChar(191)
+  providerAccountId String  @db.VarChar(191)
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String? @db.VarChar(191)
+  scope             String? @db.VarChar(191)
+  id_token          String? @db.Text
+  session_state     String? @db.VarChar(191)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
   @@index([userId])
@@ -106,35 +106,34 @@ model VerificationToken {
 
 // --- Model User ---
 model User {
-  id                   String    @id @default(cuid()) @db.VarChar(191)
-  name                 String?   @db.VarChar(191)
-  email                String    @unique @db.VarChar(191)
-  password             String?   @db.VarChar(191)
-  createdAt            DateTime  @default(now()) @db.DateTime(3)
-  updatedAt            DateTime  @updatedAt @db.DateTime(3)
-  role                 Role      @default(EMPLOYEE)
-  emailVerified        DateTime? @db.DateTime(3)
-  image                String?   @db.VarChar(191)
-  baseSalary           Decimal?  @db.Decimal(15, 2)
+  id                  String    @id @default(cuid()) @db.VarChar(191)
+  name                String?   @db.VarChar(191)
+  email               String    @unique @db.VarChar(191)
+  password            String?   @db.VarChar(191) // Seharusnya hashedPassword
+  createdAt           DateTime  @default(now()) @db.DateTime(3)
+  updatedAt           DateTime  @updatedAt @db.DateTime(3)
+  role                Role      @default(EMPLOYEE)
+  emailVerified       DateTime? @db.DateTime(3)
+  image               String?   @db.VarChar(191) // <-- GUNAKAN FIELD INI UNTUK FOTO PROFIL
+  baseSalary          Decimal?  @db.Decimal(15, 2)
 
   // Relasi ke model lain
-  accounts             Account[]
-  sessions             Session[]
-  attendanceRecords    AttendanceRecord[]
-  allowances           UserAllowance[]
-  deductions           UserDeduction[]
-  refreshTokens        RefreshToken[]     @relation("UserRefreshTokens")
+  accounts            Account[]
+  sessions            Session[]
+  attendanceRecords   AttendanceRecord[]
+  allowances          UserAllowance[]
+  deductions          UserDeduction[]
+  refreshTokens       RefreshToken[]       @relation("UserRefreshTokens")
 
   // Relasi ke Payroll
-  executedPayrollRuns  PayrollRun[]       @relation("ExecutedPayrollRuns")
-  approvedPayrollRuns  PayrollRun[]       @relation("ApprovedPayrollRuns")
-  rejectedPayrollRuns  PayrollRun[]       @relation("RejectedPayrollRuns")
-  payslips             Payslip[]
+  executedPayrollRuns PayrollRun[]         @relation("ExecutedPayrollRuns")
+  approvedPayrollRuns PayrollRun[]         @relation("ApprovedPayrollRuns")
+  rejectedPayrollRuns PayrollRun[]         @relation("RejectedPayrollRuns")
+  payslips            Payslip[]
 
   // Relasi ke LeaveRequest
-  leaveRequests          LeaveRequest[] @relation("UserLeaveRequests") // Pengajuan yang dibuat user ini
+  leaveRequests         LeaveRequest[] @relation("UserLeaveRequests") // Pengajuan yang dibuat user ini
   processedLeaveRequests LeaveRequest[] @relation("ProcessedLeaveRequests") // Pengajuan yang diproses user ini (jika user ini Yayasan)
-
 
   @@map("users")
 }
@@ -142,33 +141,28 @@ model User {
 
 // --- Model Catatan Absensi ---
 model AttendanceRecord {
-  id                String    @id @default(cuid()) @db.VarChar(191)
-  clockIn           DateTime  @db.DateTime(3)
-  clockOut          DateTime? @db.DateTime(3)
-  createdAt         DateTime  @default(now()) @db.DateTime(3)
-  updatedAt         DateTime  @updatedAt @db.DateTime(3)
-  userId            String    @db.VarChar(191)
-  
-  latitudeIn        Decimal?  @db.Decimal(9, 6) 
-  longitudeIn       Decimal?  @db.Decimal(9, 6) 
-  latitudeOut       Decimal?  @db.Decimal(9, 6) 
-  longitudeOut      Decimal?  @db.Decimal(9, 6) 
-  
-  status            AttendanceStatus @default(HADIR) 
-  selfieInUrl       String?   @db.Text             
-  selfieOutUrl      String?   @db.Text             
-  notes             String?   @db.Text             
+  id                String           @id @default(cuid()) @db.VarChar(191)
+  clockIn           DateTime         @db.DateTime(3)
+  clockOut          DateTime?        @db.DateTime(3)
+  createdAt         DateTime         @default(now()) @db.DateTime(3)
+  updatedAt         DateTime         @updatedAt @db.DateTime(3)
+  userId            String           @db.VarChar(191)
+  latitudeIn        Decimal?         @db.Decimal(9, 6)
+  longitudeIn       Decimal?         @db.Decimal(9, 6)
+  latitudeOut       Decimal?         @db.Decimal(9, 6)
+  longitudeOut      Decimal?         @db.Decimal(9, 6)
+  status            AttendanceStatus @default(HADIR)
+  selfieInUrl       String?          @db.Text
+  selfieOutUrl      String?          @db.Text
+  notes             String?          @db.Text
+  deviceModel       String?          // Model HP, contoh: "SM-A525F", "iPhone13,2"
+  deviceOS          String?          // Sistem Operasi & Versi, contoh: "Android 13", "iOS 16.5"
+  isMockLocationIn  Boolean?         @default(false) // Flag dari Flutter saat clock-in
+  gpsAccuracyIn     Decimal?         @db.Decimal(10, 2) // Akurasi GPS clock-in (meter)
+  isMockLocationOut Boolean?         @default(false) // Flag dari Flutter saat clock-out
+  gpsAccuracyOut    Decimal?         @db.Decimal(10, 2) // Akurasi GPS clock-out (meter)
 
-  // --- FIELD BARU UNTUK INFO PERANGKAT & FAKE GPS ---
-  deviceModel       String?   // Model HP, contoh: "SM-A525F", "iPhone13,2"
-  deviceOS          String?   // Sistem Operasi & Versi, contoh: "Android 13", "iOS 16.5"
-  isMockLocationIn  Boolean?  @default(false) // Flag dari Flutter saat clock-in
-  gpsAccuracyIn     Decimal?  @db.Decimal(10, 2) // Akurasi GPS clock-in (meter)
-  isMockLocationOut Boolean?  @default(false) // Flag dari Flutter saat clock-out
-  gpsAccuracyOut    Decimal?  @db.Decimal(10, 2) // Akurasi GPS clock-out (meter)
-  // --- AKHIR FIELD BARU ---
-
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, clockIn])
   @@index([userId, status])
@@ -195,7 +189,7 @@ model UserAllowance {
   userId          String        @db.VarChar(191)
   user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   allowanceTypeId String        @db.VarChar(191)
-  allowanceType   AllowanceType @relation(fields: [allowanceTypeId], references: [id], onDelete: Restrict) // Restrict agar tipe tidak bisa dihapus jika masih dipakai
+  allowanceType   AllowanceType @relation(fields: [allowanceTypeId], references: [id], onDelete: Restrict)
   createdAt       DateTime      @default(now()) @db.DateTime(3)
   updatedAt       DateTime      @updatedAt @db.DateTime(3)
 
@@ -208,16 +202,16 @@ model UserAllowance {
 
 // --- Model Potongan ---
 model DeductionType {
-  id                 String                   @id @default(cuid()) @db.VarChar(191)
-  name               String                   @unique @db.VarChar(191)
-  description        String?                  @db.Text
-  calculationType    DeductionCalculationType // Enum tipe kalkulasi
-  ruleAmount         Decimal?                 @db.Decimal(15, 2) // Untuk tipe FIXED atau PER_DAY/INSTANCE
-  rulePercentage     Decimal?                 @db.Decimal(5, 2)  // Untuk tipe PERCENTAGE (0-100)
-  isMandatory        Boolean?                 @default(false)
-  createdAt          DateTime                 @default(now()) @db.DateTime(3)
-  updatedAt          DateTime                 @updatedAt @db.DateTime(3)
-  userDeductions     UserDeduction[]
+  id               String                   @id @default(cuid()) @db.VarChar(191)
+  name             String                   @unique @db.VarChar(191)
+  description      String?                  @db.Text
+  calculationType  DeductionCalculationType
+  ruleAmount       Decimal?                 @db.Decimal(15, 2)
+  rulePercentage   Decimal?                 @db.Decimal(5, 2)
+  isMandatory      Boolean?                 @default(false)
+  createdAt        DateTime                 @default(now()) @db.DateTime(3)
+  updatedAt        DateTime                 @updatedAt @db.DateTime(3)
+  userDeductions   UserDeduction[]
 
   @@map("deduction_types")
 }
@@ -227,9 +221,9 @@ model UserDeduction {
   userId             String        @db.VarChar(191)
   user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   deductionTypeId    String        @db.VarChar(191)
-  deductionType      DeductionType @relation(fields: [deductionTypeId], references: [id], onDelete: Restrict) // Restrict agar tipe tidak bisa dihapus
-  assignedAmount     Decimal?      @db.Decimal(15, 2) // Hanya diisi jika tipe potongan adalah FIXED_USER
-  assignedPercentage Decimal?      @db.Decimal(5, 2)  // Hanya diisi jika tipe potongan adalah PERCENTAGE_USER
+  deductionType      DeductionType @relation(fields: [deductionTypeId], references: [id], onDelete: Restrict)
+  assignedAmount     Decimal?      @db.Decimal(15, 2)
+  assignedPercentage Decimal?      @db.Decimal(5, 2)
   createdAt          DateTime      @default(now()) @db.DateTime(3)
   updatedAt          DateTime      @updatedAt @db.DateTime(3)
 
@@ -248,37 +242,31 @@ model RefreshToken {
   user      User      @relation("UserRefreshTokens", fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime  @db.DateTime(3)
   createdAt DateTime  @default(now()) @db.DateTime(3)
-  revokedAt DateTime? @db.DateTime(3) // Kapan token di-revoke (saat logout atau diganti)
+  revokedAt DateTime? @db.DateTime(3)
 
   @@index([userId])
-  @@index([userId, jti]) // Untuk pencarian cepat saat refresh
+  @@index([userId, jti])
   @@map("refresh_tokens")
 }
 
 
 // === MODEL PAYROLL ===
-
 model PayrollRun {
   id              String           @id @default(cuid()) @db.VarChar(191)
-  periodStart     DateTime         @db.Date // Hanya tanggal, tanpa waktu
-  periodEnd       DateTime         @db.Date // Hanya tanggal, tanpa waktu
-  executionDate   DateTime         @default(now()) @db.DateTime(3) // Kapan payroll dijalankan
-  status          PayrollRunStatus @default(PENDING_APPROVAL) // Status payroll run
-
+  periodStart     DateTime         @db.Date
+  periodEnd       DateTime         @db.Date
+  executionDate   DateTime         @default(now()) @db.DateTime(3)
+  status          PayrollRunStatus @default(PENDING_APPROVAL)
   executedById    String?          @db.VarChar(191)
   executedBy      User?            @relation("ExecutedPayrollRuns", fields: [executedById], references: [id], onDelete: SetNull)
-
   approvedById    String?          @db.VarChar(191)
   approvedBy      User?            @relation("ApprovedPayrollRuns", fields: [approvedById], references: [id], onDelete: SetNull)
   approvedAt      DateTime?        @db.DateTime(3)
-
   rejectedById    String?          @db.VarChar(191)
   rejectedBy      User?            @relation("RejectedPayrollRuns", fields: [rejectedById], references: [id], onDelete: SetNull)
   rejectedAt      DateTime?        @db.DateTime(3)
   rejectionReason String?          @db.Text
-
-  payslips        Payslip[] // Relasi ke banyak payslip
-
+  payslips        Payslip[]
   createdAt       DateTime         @default(now()) @db.DateTime(3)
   updatedAt       DateTime         @updatedAt @db.DateTime(3)
 
@@ -288,27 +276,24 @@ model PayrollRun {
 }
 
 model Payslip {
-  id             String        @id @default(cuid()) @db.VarChar(191)
-  payrollRunId   String        @db.VarChar(191)
-  payrollRun     PayrollRun    @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
-  userId         String        @db.VarChar(191)
-  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String    @id @default(cuid()) @db.VarChar(191)
+  payrollRunId   String    @db.VarChar(191)
+  payrollRun     PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  userId         String    @db.VarChar(191)
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  baseSalary     Decimal   @db.Decimal(15, 2)
+  totalAllowance Decimal   @default(0) @db.Decimal(15, 2)
+  grossPay       Decimal   @default(0) @db.Decimal(15, 2)
+  totalDeduction Decimal   @default(0) @db.Decimal(15, 2)
+  netPay         Decimal   @default(0) @db.Decimal(15, 2)
+  attendanceDays Int       @default(0)
+  lateDays       Int       @default(0)
+  alphaDays      Int       @default(0)
+  items          PayslipItem[]
+  createdAt      DateTime  @default(now()) @db.DateTime(3)
+  updatedAt      DateTime  @updatedAt @db.DateTime(3)
 
-  baseSalary     Decimal       @db.Decimal(15, 2)
-  totalAllowance Decimal       @default(0) @db.Decimal(15, 2)
-  grossPay       Decimal       @default(0) @db.Decimal(15, 2)
-  totalDeduction Decimal       @default(0) @db.Decimal(15, 2)
-  netPay         Decimal       @default(0) @db.Decimal(15, 2)
-
-  attendanceDays Int           @default(0) // Jumlah hari hadir aktual
-  lateDays       Int           @default(0) // Jumlah hari terlambat
-  alphaDays      Int           @default(0) // Jumlah hari alpha
-
-  items          PayslipItem[] // Rincian item tunjangan/potongan
-  createdAt      DateTime      @default(now()) @db.DateTime(3)
-  updatedAt      DateTime      @updatedAt @db.DateTime(3)
-
-  @@unique([payrollRunId, userId]) // Satu user hanya punya satu payslip per payroll run
+  @@unique([payrollRunId, userId])
   @@index([userId])
   @@index([payrollRunId])
   @@map("payslips")
@@ -320,7 +305,7 @@ model PayslipItem {
   payslip     Payslip @relation(fields: [payslipId], references: [id], onDelete: Cascade)
   type        String  @db.VarChar(191) // "ALLOWANCE" atau "DEDUCTION"
   description String  @db.VarChar(191) // Nama tunjangan/potongan
-  amount      Decimal @db.Decimal(15, 2) // Jumlahnya
+  amount      Decimal @db.Decimal(15, 2)
 
   @@index([payslipId])
   @@map("payslip_items")
@@ -331,43 +316,38 @@ model PayslipItem {
 // === MODEL BARU UNTUK PENGAJUAN IZIN ===
 model LeaveRequest {
   id              String             @id @default(cuid()) @db.VarChar(191)
-  userId          String             @db.VarChar(191) // Karyawan yang mengajukan
+  userId          String             @db.VarChar(191)
   user            User               @relation("UserLeaveRequests", fields: [userId], references: [id], onDelete: Cascade)
   leaveType       AttendanceStatus   // Menggunakan enum AttendanceStatus untuk tipe (IZIN, SAKIT, CUTI)
   startDate       DateTime           @db.Date
   endDate         DateTime           @db.Date
   reason          String             @db.Text
-  attachmentUrl   String?            @db.Text // Path ke file lampiran
-  status          LeaveRequestStatus @default(PENDING_APPROVAL) // Status pengajuan
+  attachmentUrl   String?            @db.Text
+  status          LeaveRequestStatus @default(PENDING_APPROVAL)
   requestedAt     DateTime           @default(now()) @db.DateTime(3)
-
-  // Info pemroses (Yayasan)
   processedById   String?            @db.VarChar(191)
   processedBy     User?              @relation("ProcessedLeaveRequests", fields: [processedById], references: [id], onDelete: SetNull)
   processedAt     DateTime?          @db.DateTime(3)
-  rejectionReason String?            @db.Text // Alasan jika ditolak
-
+  rejectionReason String?            @db.Text
   createdAt       DateTime           @default(now()) @db.DateTime(3)
   updatedAt       DateTime           @updatedAt @db.DateTime(3)
 
   @@index([userId, status])
   @@index([status])
-  @@map("leave_requests") // Nama tabel di database
+  @@map("leave_requests")
 }
 // === AKHIR MODEL PENGAJUAN IZIN ===
 
 
 // === MODEL BARU UNTUK PENGATURAN ABSENSI ===
 model AttendanceSetting {
-  id                   String   @id @default("global_settings") @db.VarChar(191) // ID tetap agar hanya ada 1 record
-
-  workStartTimeHour    Int      @default(8)  // Jam mulai kerja (0-23)
-  workStartTimeMinute  Int      @default(0)  // Menit mulai kerja (0-59)
-  lateToleranceMinutes Int      @default(15) // Toleransi keterlambatan dalam menit
-
+  id                 String   @id @default("global_settings") @db.VarChar(191)
+  workStartTimeHour    Int      @default(8)
+  workStartTimeMinute  Int      @default(0)
+  lateToleranceMinutes Int      @default(15)
   createdAt            DateTime @default(now()) @db.DateTime(3)
   updatedAt            DateTime @updatedAt @db.DateTime(3)
 
-  @@map("attendance_settings") // Nama tabel di database
+  @@map("attendance_settings")
 }
 // === AKHIR MODEL BARU ===
