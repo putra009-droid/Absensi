@@ -146,7 +146,7 @@ model AttendanceRecord {
   createdAt         DateTime         @default(now()) @db.DateTime(3)
   updatedAt         DateTime         @updatedAt @db.DateTime(3)
   userId            String           @db.VarChar(191)
-  latitudeIn        Decimal?         @db.Decimal(9, 6)
+  latitudeIn        Decimal?         @db.Decimal(9, 6) // Presisi untuk latitude/longitude
   longitudeIn       Decimal?         @db.Decimal(9, 6)
   latitudeOut       Decimal?         @db.Decimal(9, 6)
   longitudeOut      Decimal?         @db.Decimal(9, 6)
@@ -154,10 +154,10 @@ model AttendanceRecord {
   selfieInUrl       String?          @db.Text
   selfieOutUrl      String?          @db.Text
   notes             String?          @db.Text
-  deviceModel       String?
-  deviceOS          String?
+  deviceModel       String?          @db.VarChar(191) // Batasi panjang jika perlu
+  deviceOS          String?          @db.VarChar(191) // Batasi panjang jika perlu
   isMockLocationIn  Boolean?         @default(false)
-  gpsAccuracyIn     Decimal?         @db.Decimal(10, 2)
+  gpsAccuracyIn     Decimal?         @db.Decimal(10, 2) // Akurasi dalam meter
   isMockLocationOut Boolean?         @default(false)
   gpsAccuracyOut    Decimal?         @db.Decimal(10, 2)
 
@@ -206,7 +206,7 @@ model DeductionType {
   description      String?                  @db.Text
   calculationType  DeductionCalculationType
   ruleAmount       Decimal?                 @db.Decimal(15, 2)
-  rulePercentage   Decimal?                 @db.Decimal(5, 2)
+  rulePercentage   Decimal?                 @db.Decimal(5, 2) // Persentase (misal 0.05 untuk 5%)
   isMandatory      Boolean?                 @default(false)
   createdAt        DateTime                 @default(now()) @db.DateTime(3)
   updatedAt        DateTime                 @updatedAt @db.DateTime(3)
@@ -221,8 +221,8 @@ model UserDeduction {
   user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   deductionTypeId    String        @db.VarChar(191)
   deductionType      DeductionType @relation(fields: [deductionTypeId], references: [id], onDelete: Restrict)
-  assignedAmount     Decimal?      @db.Decimal(15, 2)
-  assignedPercentage Decimal?      @db.Decimal(5, 2)
+  assignedAmount     Decimal?      @db.Decimal(15, 2) // Jika FIXED_USER
+  assignedPercentage Decimal?      @db.Decimal(5, 2)  // Jika PERCENTAGE_USER
   createdAt          DateTime      @default(now()) @db.DateTime(3)
   updatedAt          DateTime      @updatedAt @db.DateTime(3)
 
@@ -236,7 +236,7 @@ model UserDeduction {
 // --- Model Refresh Token JWT ---
 model RefreshToken {
   id        String    @id @default(cuid()) @db.VarChar(191)
-  jti       String    @unique
+  jti       String    @unique @db.VarChar(191) // Pastikan jti unik
   userId    String    @db.VarChar(191)
   user      User      @relation("UserRefreshTokens", fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime  @db.DateTime(3)
@@ -244,7 +244,7 @@ model RefreshToken {
   revokedAt DateTime? @db.DateTime(3)
 
   @@index([userId])
-  @@index([userId, jti])
+  @@index([jti]) // Indeks pada jti untuk pencarian cepat
   @@map("refresh_tokens")
 }
 
@@ -252,8 +252,8 @@ model RefreshToken {
 // === MODEL PAYROLL ===
 model PayrollRun {
   id              String           @id @default(cuid()) @db.VarChar(191)
-  periodStart     DateTime         @db.Date
-  periodEnd       DateTime         @db.Date
+  periodStart     DateTime         @db.Date // Hanya tanggal
+  periodEnd       DateTime         @db.Date // Hanya tanggal
   executionDate   DateTime         @default(now()) @db.DateTime(3)
   status          PayrollRunStatus @default(PENDING_APPROVAL)
   executedById    String?          @db.VarChar(191)
@@ -338,7 +338,7 @@ model LeaveRequest {
 // === AKHIR MODEL PENGAJUAN IZIN ===
 
 
-// === MODEL UNTUK PENGATURAN ABSENSI (DENGAN PENAMBAHAN JAM SELESAI) ===
+// === MODEL UNTUK PENGATURAN ABSENSI (DENGAN PENAMBAHAN JAM SELESAI DAN LOCK LOKASI) ===
 model AttendanceSetting {
   id                   String   @id @default("global_settings") @db.VarChar(191) // ID tetap agar hanya ada 1 record
 
@@ -346,13 +346,15 @@ model AttendanceSetting {
   workStartTimeMinute  Int      @default(0)  // Menit mulai kerja (0-59)
   lateToleranceMinutes Int      @default(15) // Toleransi keterlambatan dalam menit
 
-  workEndTimeHour      Int      @default(17) // Jam selesai kerja (0-23) <-- FIELD BARU
-  workEndTimeMinute    Int      @default(0)  // Menit selesai kerja (0-59) <-- FIELD BARU
+  workEndTimeHour      Int      @default(17) // Jam selesai kerja (0-23)
+  workEndTimeMinute    Int      @default(0)  // Menit selesai kerja (0-59)
 
-  // Opsi tambahan yang mungkin berguna nanti:
-  // allowClockInAfterEndTime Boolean @default(false) // Izinkan clock in setelah jam kerja selesai?
-  // allowClockOutBeforeEndTime Boolean @default(true) // Izinkan clock out sebelum jam kerja selesai? (mungkin dengan catatan)
-  // minimumWorkDurationMinutes Int? // Durasi kerja minimum dalam menit
+  // --- FIELD BARU UNTUK LOCK LOKASI ---
+  isLocationLockActive Boolean  @default(false) // Apakah fitur lock lokasi aktif?
+  targetLatitude       Decimal? @db.Decimal(9, 6) // Latitude titik pusat absensi
+  targetLongitude      Decimal? @db.Decimal(9, 6) // Longitude titik pusat absensi
+  allowedRadiusMeters  Int?     @default(300)    // Radius yang diizinkan dalam meter (bisa diatur admin)
+  // --- AKHIR FIELD BARU UNTUK LOCK LOKASI ---
 
   createdAt            DateTime @default(now()) @db.DateTime(3)
   updatedAt            DateTime @updatedAt @db.DateTime(3)

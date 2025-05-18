@@ -1,14 +1,13 @@
-// File Lokasi: src/app/api/attendance/clock-out/route.ts
-
+// src/app/api/attendance/clock-out/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { Prisma, AttendanceStatus, Role } from '@prisma/client'; // Import Prisma namespace & Role
-import { withAuth, AuthenticatedRequest } from '@/lib/authMiddleware'; // Pastikan path benar
+import { Prisma, AttendanceStatus } from '@prisma/client';
+import { withAuth, AuthenticatedRequest } from '@/lib/authMiddleware';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { Buffer } from 'buffer';
+import { calculateDistanceInMeters } from '@/lib/locationUtils'; // Impor fungsi kalkulasi jarak
 
-// Definisikan tipe untuk body request clock-out yang diharapkan dari FormData
 interface ClockOutFormData {
   latitude?: string | null;
   longitude?: string | null;
@@ -16,11 +15,11 @@ interface ClockOutFormData {
   notes?: string | null;
   deviceModel?: string | null;
   deviceOS?: string | null;
-  isMockLocation?: string | null; // FormData mengirim boolean sebagai string 'true'/'false'
+  isMockLocation?: string | null;
   gpsAccuracy?: string | null;
 }
 
-const SETTINGS_ID = "global_settings"; // ID tetap untuk record AttendanceSetting
+const SETTINGS_ID = "global_settings";
 
 const clockOutHandler = async (request: AuthenticatedRequest) => {
   const userId = request.user?.id;
@@ -29,11 +28,11 @@ const clockOutHandler = async (request: AuthenticatedRequest) => {
   }
   console.log(`[API Clock-Out] Received request from User: ${userId}`);
 
-  const now = new Date(); // Waktu server saat ini
+  const now = new Date();
   const todayStart = new Date(now);
-  todayStart.setHours(0, 0, 0, 0); // Awal hari ini waktu lokal server
+  todayStart.setHours(0, 0, 0, 0);
   const tomorrowStart = new Date(todayStart);
-  tomorrowStart.setDate(todayStart.getDate() + 1); // Awal hari berikutnya
+  tomorrowStart.setDate(todayStart.getDate() + 1);
 
   let latitudeDb: Prisma.Decimal | null = null;
   let longitudeDb: Prisma.Decimal | null = null;
@@ -53,27 +52,33 @@ const clockOutHandler = async (request: AuthenticatedRequest) => {
     if (!attendanceSettings) {
       console.log(`[API Clock-Out] User ${userId}: Pengaturan absensi tidak ditemukan, membuat default.`);
       attendanceSettings = await prisma.attendanceSetting.create({
-        data: { id: SETTINGS_ID }, // Nilai default akan diambil dari skema Prisma
+        data: { id: SETTINGS_ID }, // Nilai default dari skema Prisma akan digunakan
       });
     }
 
-    // Ambil jam selesai kerja dari pengaturan
-    const { workEndTimeHour, workEndTimeMinute } = attendanceSettings;
+    const {
+      workEndTimeHour,
+      workEndTimeMinute,
+      isLocationLockActive,
+      targetLatitude,
+      targetLongitude,
+      allowedRadiusMeters,
+    } = attendanceSettings;
+
     const currentHour = now.getHours();
     const currentMinute = now.getMinutes();
 
-    console.log(`[API Clock-Out] User: ${userId}, Waktu Saat Ini: ${currentHour}:${currentMinute}, Pengaturan Jam Selesai Kerja: ${workEndTimeHour}:${workEndTimeMinute}`);
+    console.log(`[API Clock-Out] User: ${userId}, Waktu Saat Ini: ${currentHour}:${currentMinute}, Pengaturan Jam Selesai: ${workEndTimeHour}:${workEndTimeMinute}`);
+    console.log(`[API Clock-Out] User: ${userId}, Location Lock Active: ${isLocationLockActive}, Target Lat: ${targetLatitude}, Target Lon: ${targetLongitude}, Radius: ${allowedRadiusMeters}m`);
 
     // 2. Periksa Apakah Sudah Waktunya Clock-Out
-    // Aturan saat ini: tidak boleh clock-out sebelum jam selesai kerja yang ditentukan.
-    // Anda bisa mengubah logika ini jika ingin mengizinkan clock-out lebih awal dengan kondisi tertentu.
     if (currentHour < workEndTimeHour || (currentHour === workEndTimeHour && currentMinute < workEndTimeMinute)) {
       const endTimeFormatted = `${String(workEndTimeHour).padStart(2, '0')}:${String(workEndTimeMinute).padStart(2, '0')}`;
       return NextResponse.json({
         success: false,
         message: `Belum waktunya untuk clock-out. Jam selesai kerja adalah pukul ${endTimeFormatted}.`,
         code: 'CLOCK_OUT_TOO_EARLY'
-      }, { status: 403 }); // 403 Forbidden atau 400 Bad Request
+      }, { status: 403 });
     }
 
     // 3. Proses FormData
@@ -95,18 +100,55 @@ const clockOutHandler = async (request: AuthenticatedRequest) => {
     if (isMockLocationString) isMockLocationOutDb = isMockLocationString === 'true';
     if (gpsAccuracyString && !isNaN(parseFloat(gpsAccuracyString))) gpsAccuracyOutDb = new Prisma.Decimal(parseFloat(gpsAccuracyString));
     
-    console.log(`[API Clock-Out] User ${userId} location: Lat=${latitudeDb}, Long=${longitudeDb}, Accuracy=${gpsAccuracyOutDb}, Mock=${isMockLocationOutDb}`);
-    console.log(`[API Clock-Out] User ${userId} device: Model=${deviceModelDb}, OS=${deviceOSDb}`);
+    console.log(`[API Clock-Out] User ${userId} location from device: Lat=${latitudeDb}, Long=${longitudeDb}, Accuracy=${gpsAccuracyOutDb}, Mock=${isMockLocationOutDb}`);
 
-    // Validasi dasar (latitude, longitude, dan selfie mungkin wajib)
-    if (latitudeDb === null || longitudeDb === null) {
-      return NextResponse.json({ success: false, message: 'Data lokasi (latitude, longitude) wajib diisi.' }, { status: 400 });
-    }
+    // Validasi dasar: selfie wajib
     if (!selfieFile) {
       return NextResponse.json({ success: false, message: 'File selfie wajib diunggah.' }, { status: 400 });
     }
 
-    // 4. Simpan Selfie Clock-Out
+    // 4. Pemeriksaan Lock Lokasi (JIKA AKTIF)
+    if (isLocationLockActive) {
+      console.log(`[API Clock-Out] User ${userId}: Location lock is ACTIVE. Validating location...`);
+      if (targetLatitude === null || targetLongitude === null || allowedRadiusMeters === null) {
+        console.warn(`[API Clock-Out] User ${userId}: Location lock active but target location/radius not set by admin.`);
+        return NextResponse.json({
+          success: false,
+          message: 'Fitur pembatasan lokasi aktif tetapi belum dikonfigurasi oleh admin. Hubungi admin.',
+          code: 'LOCATION_LOCK_NOT_CONFIGURED'
+        }, { status: 400 });
+      }
+      if (latitudeDb === null || longitudeDb === null) {
+        return NextResponse.json({
+          success: false,
+          message: 'Data lokasi (latitude, longitude) wajib diisi karena pembatasan lokasi aktif.',
+          code: 'LOCATION_REQUIRED_FOR_LOCK'
+        }, { status: 400 });
+      }
+
+      const distance = calculateDistanceInMeters(
+        Number(latitudeDb),
+        Number(longitudeDb),
+        Number(targetLatitude),
+        Number(targetLongitude)
+      );
+      console.log(`[API Clock-Out] User ${userId}: Distance from target: ${distance.toFixed(2)} meters. Allowed radius: ${allowedRadiusMeters}m.`);
+
+      if (distance > allowedRadiusMeters) {
+        return NextResponse.json({
+          success: false,
+          message: `Anda berada di luar radius lokasi absensi yang diizinkan (${allowedRadiusMeters} meter). Jarak Anda: ${distance.toFixed(0)} meter.`,
+          code: 'OUT_OF_ALLOWED_RADIUS'
+        }, { status: 403 });
+      }
+    } else {
+        console.log(`[API Clock-Out] User ${userId}: Location lock is INACTIVE.`);
+        if (latitudeDb === null || longitudeDb === null) {
+            console.log(`[API Clock-Out] User ${userId}: Location data not provided, but lock is inactive. Proceeding without location validation.`);
+        }
+    }
+
+    // 5. Simpan Selfie Clock-Out
     if (selfieFile) {
       try {
         const fileBuffer = Buffer.from(await selfieFile.arrayBuffer());
@@ -124,23 +166,23 @@ const clockOutHandler = async (request: AuthenticatedRequest) => {
         return NextResponse.json({ success: false, message: 'Gagal menyimpan file selfie.' }, { status: 500 });
       }
     }
-    if (!selfieUrlDb) { // Jika selfie wajib dan gagal disimpan
+    if (!selfieUrlDb) {
         return NextResponse.json({ success: false, message: 'Selfie wajib diunggah dan gagal diproses.' }, { status: 400 });
     }
 
-    // 5. Cari Record Absensi yang Aktif untuk Diperbarui
+    // 6. Cari Record Absensi yang Aktif untuk Diperbarui
     console.log(`[API Clock-Out] Mencari record aktif untuk user: ${userId} pada hari ini.`);
     const activeRecord = await prisma.attendanceRecord.findFirst({
       where: {
         userId: userId,
         clockIn: { 
-            gte: todayStart, // Clock-in terjadi pada hari ini
-            lt: tomorrowStart // Sebelum awal hari berikutnya
+            gte: todayStart,
+            lt: tomorrowStart 
         },
-        clockOut: null, // Penting: hanya yang belum clock-out
-        status: { in: [AttendanceStatus.HADIR, AttendanceStatus.TERLAMBAT] } // Hanya yang statusnya masih berjalan
+        clockOut: null,
+        status: { in: [AttendanceStatus.HADIR, AttendanceStatus.TERLAMBAT] }
       },
-      orderBy: { clockIn: 'desc' } // Ambil yang paling baru jika ada beberapa (seharusnya tidak jika logika clock-in benar)
+      orderBy: { clockIn: 'desc' }
     });
     console.log(`[API Clock-Out] User ${userId} - Hasil pencarian record aktif:`, activeRecord ? `ID: ${activeRecord.id}, Status: ${activeRecord.status}` : 'Not Found');
 
@@ -148,71 +190,70 @@ const clockOutHandler = async (request: AuthenticatedRequest) => {
       console.warn(`[API Clock-Out] Record aktif tidak ditemukan untuk user: ${userId}`);
       return NextResponse.json(
         { success: false, message: 'Tidak ada absensi aktif (status HADIR/TERLAMBAT) yang ditemukan untuk di-clock-out hari ini. Silakan clock-in terlebih dahulu atau pastikan status absensi Anda benar.' },
-        { status: 404 } // 404 Not Found
+        { status: 404 }
       );
     }
 
-    // 6. Update Record Absensi dengan Data Clock-Out
+    // 7. Update Record Absensi dengan Data Clock-Out
     console.log(`[API Clock-Out] User ${userId} - Mengupdate record ID: ${activeRecord.id}`);
     const updatedRecord = await prisma.attendanceRecord.update({
       where: { id: activeRecord.id },
       data: {
-        clockOut: now, // Waktu aktual server saat clock-out
-        status: AttendanceStatus.SELESAI, // Set status menjadi SELESAI
+        clockOut: now,
+        status: AttendanceStatus.SELESAI,
         latitudeOut: latitudeDb,
         longitudeOut: longitudeDb,
         selfieOutUrl: selfieUrlDb,
-        notes: notesDb ?? activeRecord.notes, // Update notes jika ada, atau biarkan yang lama jika tidak ada input baru
-        // Simpan info perangkat & GPS saat clock-out
-        deviceModel: deviceModelDb ?? activeRecord.deviceModel, // Ambil dari request, fallback ke data clock-in jika tidak ada
+        notes: notesDb ?? activeRecord.notes,
+        deviceModel: deviceModelDb ?? activeRecord.deviceModel,
         deviceOS: deviceOSDb ?? activeRecord.deviceOS,
-        isMockLocationOut: isMockLocationOutDb, // isMockLocationOutDb sudah boolean
+        isMockLocationOut: isMockLocationOutDb,
         gpsAccuracyOut: gpsAccuracyOutDb,
       },
-      select: { // Pilih field yang ingin dikembalikan dalam respons
+      select: { 
         id: true, clockIn: true, clockOut: true, status: true,
         latitudeOut: true, longitudeOut: true, selfieOutUrl: true,
-        deviceModel: true, deviceOS: true, isMockLocationOut: true, gpsAccuracyOut: true
-        // Anda bisa menambahkan field lain dari activeRecord jika perlu dikembalikan
-        // Misalnya, selfieInUrl, latitudeIn, dll.
+        deviceModel: true, deviceOS: true, isMockLocationOut: true, gpsAccuracyOut: true,
+        // Tambahkan field lain yang mungkin ingin Anda kembalikan
+        selfieInUrl: true, latitudeIn: true, longitudeIn: true, notes: true 
       }
     });
 
     console.log(`[API Clock-Out] User ${userId} clocked out successfully. Record ID: ${updatedRecord.id}, Status: ${updatedRecord.status}`);
 
-    // Kirim respons sukses
     return NextResponse.json({
       success: true, message: 'Clock out berhasil!',
       data: {
         id: updatedRecord.id,
-        status: updatedRecord.status.toString(), // Kirim status sebagai string
-        clockIn: updatedRecord.clockIn.toISOString(), // Kirim juga clockIn untuk referensi
-        clockOut: updatedRecord.clockOut?.toISOString() ?? null, // clockOut sekarang pasti ada
+        status: updatedRecord.status.toString(),
+        clockIn: updatedRecord.clockIn.toISOString(),
+        clockOut: updatedRecord.clockOut?.toISOString() ?? null,
         latitudeOut: updatedRecord.latitudeOut !== null ? Number(updatedRecord.latitudeOut) : null,
         longitudeOut: updatedRecord.longitudeOut !== null ? Number(updatedRecord.longitudeOut) : null,
         selfieUrl: updatedRecord.selfieOutUrl, // Ini adalah selfieOutUrl
-        deviceModel: updatedRecord.deviceModel,
+        // Kembalikan juga data clock-in jika diperlukan oleh UI
+        selfieInUrl: updatedRecord.selfieInUrl,
+        latitudeIn: updatedRecord.latitudeIn !== null ? Number(updatedRecord.latitudeIn) : null,
+        longitudeIn: updatedRecord.longitudeIn !== null ? Number(updatedRecord.longitudeIn) : null,
+        notes: updatedRecord.notes,
+        deviceModel: updatedRecord.deviceModel, // Ini akan menjadi deviceModel dari clock-out jika dikirim, atau dari clock-in jika tidak
         deviceOS: updatedRecord.deviceOS,
         isMockLocationOut: updatedRecord.isMockLocationOut,
         gpsAccuracyOut: updatedRecord.gpsAccuracyOut !== null ? Number(updatedRecord.gpsAccuracyOut) : null,
       }
-    }, { status: 200 }); // Status 200 OK untuk update
+    }, { status: 200 });
 
   } catch (error: unknown) {
     console.error(`[CLOCK_OUT_ERROR] User ${userId}:`, error);
     let errorMessage = 'Terjadi kesalahan sistem saat clock out.';
-    // let errorCode: string | undefined = undefined; // Jika Anda ingin mengirim kode error Prisma
-
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      errorMessage = `Database error saat clock out.`; // Jangan sertakan error.message langsung ke klien untuk keamanan
-      // errorCode = error.code;
-      return NextResponse.json({ success: false, message: errorMessage /*, code: errorCode */ }, { status: 500 });
+      errorMessage = `Database error saat clock out.`;
+      return NextResponse.json({ success: false, message: errorMessage, code: error.code }, { status: 500 });
     } else if (error instanceof Error) {
-      errorMessage = error.message; // Untuk error lain, message bisa lebih informatif
+      errorMessage = error.message;
     }
     return NextResponse.json({ success: false, message: `Terjadi kesalahan sistem saat clock out: ${errorMessage}` }, { status: 500 });
   }
 };
 
-// Bungkus handler dengan middleware autentikasi
-export const POST = withAuth(clockOutHandler as any); // Pastikan withAuth di-cast jika perlu
+export const POST = withAuth(clockOutHandler as any);
