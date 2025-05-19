@@ -9,8 +9,17 @@ const SETTINGS_ID = "global_settings"; // ID tetap untuk record AttendanceSettin
 
 // Handler untuk GET request (mengambil pengaturan absensi)
 const getAttendanceSettingsHandler = async (request: AuthenticatedRequest) => {
-  if (request.user?.role !== Role.SUPER_ADMIN) {
-    return NextResponse.json({ success: false, message: 'Akses ditolak: Hanya SUPER_ADMIN yang diizinkan.' }, { status: 403 });
+  // --- PERUBAHAN DI SINI ---
+  // Pengecekan role SUPER_ADMIN untuk GET dihapus/dikomentari.
+  // Sekarang semua pengguna yang terautentikasi (melalui withAuth) bisa mengambil pengaturan.
+  // if (request.user?.role !== Role.SUPER_ADMIN) {
+  //   return NextResponse.json({ success: false, message: 'Akses ditolak: Hanya SUPER_ADMIN yang diizinkan.' }, { status: 403 });
+  // }
+  // --- AKHIR PERUBAHAN ---
+
+  // Pastikan user terautentikasi (meskipun role tidak lagi dicek di sini untuk GET)
+  if (!request.user?.id) {
+    return NextResponse.json({ success: false, message: 'Tidak terautentikasi.' }, { status: 401 });
   }
 
   try {
@@ -23,8 +32,7 @@ const getAttendanceSettingsHandler = async (request: AuthenticatedRequest) => {
       settings = await prisma.attendanceSetting.create({
         data: {
           id: SETTINGS_ID,
-          // Nilai default akan diambil dari skema Prisma jika tidak dispesifikkan di sini.
-          // Skema Anda sudah memiliki @default untuk semua field di AttendanceSetting.
+          // Nilai default akan diambil dari skema Prisma
         },
       });
       console.log(`[API AttendanceSettings] Record default berhasil dibuat.`);
@@ -45,14 +53,13 @@ const getAttendanceSettingsHandler = async (request: AuthenticatedRequest) => {
 
 // Handler untuk POST request (memperbarui pengaturan absensi)
 const updateAttendanceSettingsHandler = async (request: AuthenticatedRequest) => {
+  // Pengecekan role SUPER_ADMIN untuk POST (update) TETAP ADA
   if (request.user?.role !== Role.SUPER_ADMIN) {
-    return NextResponse.json({ success: false, message: 'Akses ditolak: Hanya SUPER_ADMIN yang diizinkan.' }, { status: 403 });
+    return NextResponse.json({ success: false, message: 'Akses ditolak: Hanya SUPER_ADMIN yang diizinkan untuk memperbarui.' }, { status: 403 });
   }
 
   try {
     const body = await request.json();
-
-    // Ambil semua nilai dari body
     const {
       workStartTimeHour,
       workStartTimeMinute,
@@ -60,12 +67,12 @@ const updateAttendanceSettingsHandler = async (request: AuthenticatedRequest) =>
       workEndTimeHour,
       workEndTimeMinute,
       isLocationLockActive,
-      targetLatitude: bodyTargetLatitude,     // Beri nama berbeda untuk menghindari kebingungan scope
-      targetLongitude: bodyTargetLongitude,   // Beri nama berbeda
-      allowedRadiusMeters: bodyAllowedRadiusMeters, // Beri nama berbeda
+      targetLatitude: bodyTargetLatitude,
+      targetLongitude: bodyTargetLongitude,
+      allowedRadiusMeters: bodyAllowedRadiusMeters,
     } = body;
 
-    // Validasi input dasar
+    // Validasi input (seperti sebelumnya)
     if (
       typeof workStartTimeHour !== 'number' || workStartTimeHour < 0 || workStartTimeHour > 23 ||
       typeof workStartTimeMinute !== 'number' || workStartTimeMinute < 0 || workStartTimeMinute > 59 ||
@@ -80,11 +87,6 @@ const updateAttendanceSettingsHandler = async (request: AuthenticatedRequest) =>
       }, { status: 400 });
     }
 
-    // Variabel untuk menyimpan nilai yang sudah diproses untuk database
-    let finalTargetLatitude: Prisma.Decimal | null = null;
-    let finalTargetLongitude: Prisma.Decimal | null = null;
-    let finalAllowedRadiusMeters: number | null = null;
-
     if (isLocationLockActive === true) {
       if (
         bodyTargetLatitude === null || bodyTargetLatitude === undefined || typeof bodyTargetLatitude !== 'number' || bodyTargetLatitude < -90 || bodyTargetLatitude > 90 ||
@@ -96,21 +98,18 @@ const updateAttendanceSettingsHandler = async (request: AuthenticatedRequest) =>
           message: 'Jika lock lokasi aktif, Latitude (-90 to 90), Longitude (-180 to 180), dan Radius (harus > 0) wajib diisi dengan benar.',
         }, { status: 400 });
       }
+    }
+    
+    let finalTargetLatitude: Prisma.Decimal | null = null;
+    let finalTargetLongitude: Prisma.Decimal | null = null;
+    let finalAllowedRadiusMeters: number | null = null;
+
+    if (isLocationLockActive === true) {
       finalTargetLatitude = new Prisma.Decimal(Number(bodyTargetLatitude).toFixed(6));
       finalTargetLongitude = new Prisma.Decimal(Number(bodyTargetLongitude).toFixed(6));
       finalAllowedRadiusMeters = parseInt(String(bodyAllowedRadiusMeters));
-    } else {
-      // Jika lock tidak aktif, pastikan nilai-nilai ini null untuk update/create
-      finalTargetLatitude = null;
-      finalTargetLongitude = null;
-      finalAllowedRadiusMeters = null; // Atau Anda bisa membiarkan @default dari skema jika create,
-                                       // tapi untuk update, set null agar membersihkan nilai sebelumnya.
-                                       // Skema Anda sudah punya @default(300) untuk allowedRadiusMeters,
-                                       // jadi saat create, jika ini null, default akan dipakai jika tidak di-override.
-                                       // Namun, jika kita ingin 'menonaktifkan' radius, set ke null adalah yang terbaik.
     }
     
-    // Data untuk operasi update dan create
     const dataForOperation = {
         workStartTimeHour,
         workStartTimeMinute,
@@ -118,23 +117,17 @@ const updateAttendanceSettingsHandler = async (request: AuthenticatedRequest) =>
         workEndTimeHour,
         workEndTimeMinute,
         isLocationLockActive,
-        targetLatitude: finalTargetLatitude,       // Tipe: Prisma.Decimal | null
-        targetLongitude: finalTargetLongitude,     // Tipe: Prisma.Decimal | null
-        allowedRadiusMeters: finalAllowedRadiusMeters, // Tipe: number | null
+        targetLatitude: finalTargetLatitude,
+        targetLongitude: finalTargetLongitude,
+        allowedRadiusMeters: finalAllowedRadiusMeters,
     };
 
     const updatedSettings = await prisma.attendanceSetting.upsert({
       where: { id: SETTINGS_ID },
-      update: dataForOperation, // Semua field di sini akan di-set nilainya
+      update: dataForOperation,
       create: {
         id: SETTINGS_ID,
         ...dataForOperation,
-        // Jika ada field di 'dataForOperation' yang null dan skema memiliki @default,
-        // dan field tersebut opsional saat create, @default akan digunakan jika field tidak ada.
-        // Namun karena semua field ada di 'dataForOperation' (meskipun nilainya null),
-        // nilai null tersebut yang akan digunakan untuk create, meng-override @default jika fieldnya nullable.
-        // Untuk field yang non-nullable di create (seperti Int), pastikan ada nilainya.
-        // Semua field di AttendanceSetting Anda memiliki @default atau nullable, jadi ini aman.
       },
     });
 
